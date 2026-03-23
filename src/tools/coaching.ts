@@ -68,7 +68,7 @@ function compactPlannedWorkout(e: any): Record<string, unknown> {
   return stripNulls({
     name: e.name,
     type: e.type,
-    category: e.category === "RACE" ? "RACE" : undefined,
+    category: e.category && e.category.startsWith("RACE") ? e.category : undefined,
     tss: r1(e.icu_training_load),
     time_mins: e.moving_time ? Math.round(e.moving_time / 60) : undefined,
   });
@@ -194,7 +194,7 @@ export function registerCoachingTools(
       const targetsByWeek = new Map<string, any[]>();
       for (const e of events) {
         const d = (e.start_date_local || "").slice(0, 10);
-        if (e.category === "WORKOUT" || e.category === "RACE") {
+        if (e.category === "WORKOUT" || (e.category && e.category.startsWith("RACE"))) {
           if (!workoutsByDate.has(d)) workoutsByDate.set(d, []);
           workoutsByDate.get(d)!.push(e);
         } else if (e.category === "TARGET") {
