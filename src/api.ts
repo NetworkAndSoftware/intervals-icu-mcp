@@ -3,7 +3,7 @@ import type { StreamType } from "./types.js";
 const BASE_URL = "https://intervals.icu/api/v1";
 
 export class IntervalsClient {
-  private athleteId: string;
+  readonly athleteId: string;
   private authHeader: string;
 
   constructor(athleteId: string, apiKey: string) {
@@ -48,9 +48,22 @@ export class IntervalsClient {
   }
 
   async getActivityStreams(id: string, types: StreamType[]) {
-    return this.request<unknown>(`/activities/${id}/streams`, {
-      types: types.join(","),
+    const url = new URL(`${BASE_URL}/activity/${id}/streams`);
+    url.searchParams.set("types", types.join(","));
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        Authorization: this.authHeader,
+        Accept: "application/json",
+      },
     });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new IntervalsApiError(res.status, res.statusText, body);
+    }
+
+    return (await res.json()) as unknown;
   }
 
   async getFitness(start: string, end: string) {
@@ -62,7 +75,7 @@ export class IntervalsClient {
   }
 
   async getPowerCurve(oldest: string, newest: string) {
-    return this.request<unknown>("/power-curve", { oldest, newest });
+    return this.request<unknown>("/activity-power-curves", { oldest, newest });
   }
 
   async getWellness(oldest: string, newest: string) {
@@ -70,7 +83,7 @@ export class IntervalsClient {
   }
 
   async getZones() {
-    return this.request<unknown[]>("/zones");
+    return this.request<unknown[]>("/sport-settings");
   }
 
   async uploadActivity(fileBuffer: Buffer, filename: string, name?: string, description?: string) {

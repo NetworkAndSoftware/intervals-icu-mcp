@@ -18,11 +18,15 @@ export function registerFitnessTools(
     async ({ start, end }) => {
       const cacheKey = `fitness:${start}:${end}`;
       const cached = cache.get<unknown[]>(cacheKey);
-      if (cached) return { content: [{ type: "text", text: JSON.stringify(cached, null, 2) }] };
+      if (cached) {
+        const own = cached.filter((f: any) => f.athlete_id === client.athleteId);
+        return { content: [{ type: "text", text: JSON.stringify(own, null, 2) }] };
+      }
 
       const data = await client.getFitness(start, end);
       cache.set(cacheKey, data, TTL.FOUR_HOURS);
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      const own = (data as any[]).filter((f: any) => f.athlete_id === client.athleteId);
+      return { content: [{ type: "text", text: JSON.stringify(own, null, 2) }] };
     }
   );
 

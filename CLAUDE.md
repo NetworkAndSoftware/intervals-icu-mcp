@@ -65,6 +65,12 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 
 ## Known Issues & Gotchas
 
+### API paths can move without notice (2026-07 and 2026-08 breakage)
+The `/api/v1/athlete/{id}/activities/{activityId}/streams` and `/api/v1/athlete/{id}/power-curve` endpoints from the original docs both started 404ing — intervals.icu moved them to `/api/v1/activity/{activityId}/streams` (no `/athlete/{id}` prefix, activity IDs are global) and `/api/v1/athlete/{id}/activity-power-curves`. `/api/v1/athlete/{id}/zones` also started 404ing and has no direct replacement — zone data now lives on `/api/v1/athlete/{id}/sport-settings`, which returns one entry per activity type (Ride, Run, Rowing, etc.) with `power_zones`, `power_zone_names`, `hr_zones`, `hr_zone_names`, `ftp`, `lthr`, and a lot of other per-sport config alongside the zone fields. If a tool suddenly 404s on every input, don't assume the service is down — fetch the live OpenAPI spec at `https://intervals.icu/api/v1/docs` (JSON) and grep it for the resource name; the static docs page at api-docs.html is a JS app WebFetch can't render, but the spec JSON behind it is authoritative and current.
+
+### athlete-summary returns followed athletes
+The `/athlete-summary` endpoint returns weekly entries for **all followed athletes** when called with Basic auth (not a bearer token). Each entry has `athlete_id` (e.g. `"i458859"`) and `athlete_name`. Always filter by `athlete_id === INTERVALS_ATHLETE_ID` before using any data from this endpoint. Both `get_fitness` and `get_coaching_context` apply this filter.
+
 ### Strava-locked activities
 Activities sourced from Strava (`source: "STRAVA"`) return no name, type, TSS, or any useful data via the API. This is a Strava API licensing restriction. The `get_fitness` endpoint includes their load in aggregates, but individual activity detail is inaccessible. Workaround: delete and re-upload the `.fit` file directly so it comes in as `FILE_UPLOAD`.
 
@@ -153,12 +159,12 @@ Docs: https://intervals.icu/api-docs.html
 Key endpoints used:
 - `GET /api/v1/athlete/{id}/activities` — list activities
 - `GET /api/v1/athlete/{id}/activities/{activityId}` — activity detail
-- `GET /api/v1/athlete/{id}/activities/{activityId}/streams` — streams
+- `GET /api/v1/activity/{activityId}/streams` — streams (not under `/athlete/{id}` — activity IDs are globally unique)
 - `GET /api/v1/athlete/{id}/athlete-summary` — weekly fitness aggregates
 - `GET /api/v1/athlete/{id}/events` — calendar events
-- `GET /api/v1/athlete/{id}/power-curve` — power curve
+- `GET /api/v1/athlete/{id}/activity-power-curves` — power curve (best power per duration for activities in a date range)
 - `GET /api/v1/athlete/{id}/wellness` — wellness
-- `GET /api/v1/athlete/{id}/zones` — zones
+- `GET /api/v1/athlete/{id}/sport-settings` — zones (per-sport, includes power/HR zones plus other config; `/zones` 404s)
 - `POST /api/v1/athlete/{id}/activities` — upload activity (multipart)
 - `POST /api/v1/athlete/{id}/events` — create event
 - `PUT /api/v1/athlete/{id}/events/{eventId}` — update event

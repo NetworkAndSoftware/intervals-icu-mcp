@@ -172,7 +172,8 @@ export function registerCoachingTools(
 
       const [fitnessData, activitiesData, wellnessData, eventsData] = await Promise.all(fetches);
 
-      const fitness = fitnessData as any[];
+      // athlete-summary returns all followed athletes when using Basic auth; keep only own data
+      const fitness = (fitnessData as any[]).filter((f: any) => f.athlete_id === client.athleteId);
       const activities = activitiesData as any[];
       const wellness = wellnessData as any[];
       const events = eventsData as any[];

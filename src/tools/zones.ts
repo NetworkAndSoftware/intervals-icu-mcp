@@ -9,7 +9,7 @@ export function registerZonesTools(
 ) {
   server.tool(
     "get_athlete_zones",
-    "Get the athlete's power and heart rate zone configuration.",
+    "Get the athlete's power and heart rate zone configuration. Returns one sport-settings entry per activity type (Ride, Run, Rowing, etc.), each with power_zones, power_zone_names, hr_zones, hr_zone_names, ftp, lthr, and related fields.",
     {},
     async () => {
       const cacheKey = "zones";
