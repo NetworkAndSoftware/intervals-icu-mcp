@@ -7,17 +7,28 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "start:http": "node dist/index.js --http",
+    "dev": "tsc --watch",
+    "build:lambda": "node scripts/build-lambda.mjs",
+    "users": "node scripts/users.mjs",
+    "deploy": "npm run build:lambda && sam deploy"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "serverless-http": "^4.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@aws-sdk/client-lambda": "^3.1141.0",
+    "@aws-sdk/client-ssm": "^3.1141.0",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.13.14",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.2"
   }
 }

@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: intervals.icu MCP server for claude.ai custom connectors, behind an OAuth password login per athlete
+
+Parameters:
+  SsmPrefix:
+    Type: String
+    Default: /intervals-icu-mcp
+    AllowedPattern: ^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$
+    Description: SSM Parameter Store path holding the secrets (managed with npm run users)
+  RedirectUris:
+    Type: String
+    Default: https://claude.ai/api/mcp/auth_callback
+    Description: Comma-separated OAuth redirect URIs that clients may register
+
+Resources:
+  McpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: intervals-icu-mcp
+      # Built by npm run build:lambda; sam deploy zips this folder as-is (no sam build)
+      CodeUri: dist-lambda/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      MemorySize: 1024
+      Timeout: 60
+      Environment:
+        Variables:
+          SSM_PREFIX: !Ref SsmPrefix
+          OAUTH_REDIRECT_URIS: !Ref RedirectUris
+          NODE_ENV: production
+          NODE_OPTIONS: --enable-source-maps
+      # Public URL; every route except OAuth discovery and the login page requires a token.
+      # SAM adds both resource-policy statements (InvokeFunctionUrl and InvokeFunction) for this.
+      FunctionUrlConfig:
+        AuthType: NONE
+      LoggingConfig:
+        LogGroup: !Ref McpLogGroup
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameters
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/*
+
+  McpLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/intervals-icu-mcp
+      RetentionInDays: 14
+
+Outputs:
+  McpServerUrl:
+    Description: Paste into claude.ai > Settings > Connectors > Add custom connector
+    Value: !Sub ${McpFunctionUrl.FunctionUrl}mcp

@@ -5,9 +5,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 export function registerUploadTools(
   server: McpServer,
-  client: IntervalsClient
+  client: IntervalsClient,
+  // Off when hosted remotely: there's no user disk there, and reading the host's
+  // filesystem (e.g. /proc/self/environ) would leak its credentials
+  { allowLocalFiles = true }: { allowLocalFiles?: boolean } = {}
 ) {
-  server.tool(
+  if (allowLocalFiles) server.tool(
     "upload_activity",
     "Upload a completed activity file (.fit, .gpx, .tcx, .fit.gz) to intervals.icu.",
     {
@@ -64,6 +67,9 @@ export function registerUploadTools(
       if (indoor != null) event.indoor = indoor;
 
       if (file_path) {
+        if (!allowLocalFiles) {
+          return { content: [{ type: "text", text: "file_path is not supported on the remote server" }], isError: true };
+        }
         const fileBuffer = await readFile(file_path);
         const filename = file_path.replace(/\\/g, "/").split("/").pop() || "workout.fit";
         event.filename = filename;

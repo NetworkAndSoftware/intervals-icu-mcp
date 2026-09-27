@@ -1,64 +1,7 @@
-import Database from "better-sqlite3";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, "..", "cache.db");
-
-export class Cache {
-  private db: Database.Database;
-
-  constructor(dbPath?: string) {
-    this.db = new Database(dbPath ?? DB_PATH);
-    this.db.pragma("journal_mode = WAL");
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS cache (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        fetched_at INTEGER NOT NULL,
-        ttl INTEGER NOT NULL
-      )
-    `);
-  }
-
-  get<T>(key: string): T | null {
-    const row = this.db
-      .prepare("SELECT value, fetched_at, ttl FROM cache WHERE key = ?")
-      .get(key) as { value: string; fetched_at: number; ttl: number } | undefined;
-
-    if (!row) return null;
-
-    // ttl of 0 means never expires
-    if (row.ttl > 0) {
-      const age = Math.floor(Date.now() / 1000) - row.fetched_at;
-      if (age > row.ttl) {
-        this.db.prepare("DELETE FROM cache WHERE key = ?").run(key);
-        return null;
-      }
-    }
-
-    return JSON.parse(row.value) as T;
-  }
-
-  set(key: string, value: unknown, ttl: number): void {
-    this.db
-      .prepare(
-        "INSERT OR REPLACE INTO cache (key, value, fetched_at, ttl) VALUES (?, ?, ?, ?)"
-      )
-      .run(key, JSON.stringify(value), Math.floor(Date.now() / 1000), ttl);
-  }
-
-  delete(key: string): void {
-    this.db.prepare("DELETE FROM cache WHERE key = ?").run(key);
-  }
-
-  clear(): void {
-    this.db.exec("DELETE FROM cache");
-  }
-
-  close(): void {
-    this.db.close();
-  }
+export interface Cache {
+  get<T>(key: string): T | null;
+  set(key: string, value: unknown, ttl: number): void;
+  clear(): void;
 }
 
 // TTL constants in seconds
@@ -68,3 +11,37 @@ export const TTL = {
   FOUR_HOURS: 14400,
   ONE_DAY: 86400,
 } as const;
+
+// Used where the SQLite cache can't run (Lambda: no native module, ephemeral disk).
+// Values are stored serialized so callers can't mutate cached data, same as SQLite.
+export class MemoryCache implements Cache {
+  private entries = new Map<string, { value: string; fetchedAt: number; ttl: number }>();
+
+  constructor(private maxEntries = 500) {}
+
+  get<T>(key: string): T | null {
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+
+    // ttl of 0 means never expires
+    if (entry.ttl > 0 && Math.floor(Date.now() / 1000) - entry.fetchedAt > entry.ttl) {
+      this.entries.delete(key);
+      return null;
+    }
+
+    return JSON.parse(entry.value) as T;
+  }
+
+  set(key: string, value: unknown, ttl: number): void {
+    this.entries.delete(key);
+    this.entries.set(key, { value: JSON.stringify(value), fetchedAt: Math.floor(Date.now() / 1000), ttl });
+    // Map iterates in insertion order, so the first key is the oldest write
+    if (this.entries.size > this.maxEntries) {
+      this.entries.delete(this.entries.keys().next().value!);
+    }
+  }
+
+  clear(): void {
+    this.entries.clear();
+  }
+}

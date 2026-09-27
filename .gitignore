@@ -6,3 +6,5 @@ cache.db-wal
 *.db-journal
 .env
 .claude/settings.local.json
+dist-lambda/
+.aws-sam/

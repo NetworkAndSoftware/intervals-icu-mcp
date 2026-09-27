@@ -1,15 +1,9 @@
 import "dotenv/config";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { IntervalsClient } from "./api.js";
-import { Cache } from "./cache.js";
-import { registerActivityTools } from "./tools/activities.js";
-import { registerFitnessTools } from "./tools/fitness.js";
-import { registerPowerCurveTools } from "./tools/power-curve.js";
-import { registerWellnessTools } from "./tools/wellness.js";
-import { registerZonesTools } from "./tools/zones.js";
-import { registerUploadTools } from "./tools/upload.js";
-import { registerCoachingTools } from "./tools/coaching.js";
+import { createHttpApp, parseUsers, redirectUrisFromEnv } from "./http.js";
+import { createMcpServer } from "./server.js";
+import { SqliteCache } from "./sqlite-cache.js";
 
 const athleteId = process.env.INTERVALS_ATHLETE_ID;
 const apiKey = process.env.INTERVALS_API_KEY;
@@ -22,32 +16,28 @@ if (!athleteId || !apiKey) {
   process.exit(1);
 }
 
-const client = new IntervalsClient(athleteId, apiKey);
-const cache = new Cache();
-
-const server = new McpServer({
-  name: "intervals-icu",
-  version: "1.0.0",
-});
-
-registerActivityTools(server, client, cache);
-registerFitnessTools(server, client, cache);
-registerPowerCurveTools(server, client, cache);
-registerWellnessTools(server, client, cache);
-registerZonesTools(server, client, cache);
-registerUploadTools(server, client);
-registerCoachingTools(server, client, cache);
-
-server.tool(
-  "clear_cache",
-  "Clear the local cache so that fresh data is fetched from intervals.icu on the next request.",
-  {},
-  async () => {
-    cache.clear();
-    return { content: [{ type: "text", text: "Cache cleared." }] };
+if (process.argv.includes("--http")) {
+  // Local run of the remote setup that Lambda uses (src/lambda.ts), for testing the OAuth flow.
+  // Signs in as MCP_USERNAME/MCP_PASSWORD with the .env athlete, or MCP_USERS (same JSON as Lambda).
+  const password = process.env.MCP_PASSWORD;
+  const signingSecret = process.env.MCP_SIGNING_SECRET;
+  if ((!password && !process.env.MCP_USERS) || !signingSecret) {
+    console.error("HTTP mode needs MCP_PASSWORD (or MCP_USERS) and MCP_SIGNING_SECRET in the environment.");
+    process.exit(1);
   }
-);
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
-console.error("intervals-icu MCP server running on stdio");
+  const port = Number(process.env.PORT ?? 3000);
+  const app = createHttpApp({
+    users: process.env.MCP_USERS
+      ? parseUsers(process.env.MCP_USERS)
+      : [{ name: process.env.MCP_USERNAME ?? "me", password: password!, athleteId, apiKey }],
+    signingSecret,
+    redirectUris: redirectUrisFromEnv(process.env.OAUTH_REDIRECT_URIS),
+    publicUrl: process.env.PUBLIC_URL ?? `http://localhost:${port}`,
+  });
+  app.listen(port, () => console.error(`intervals-icu MCP server listening on http://localhost:${port}/mcp`));
+} else {
+  const server = createMcpServer(new IntervalsClient(athleteId, apiKey), new SqliteCache());
+  await server.connect(new StdioServerTransport());
+  console.error("intervals-icu MCP server running on stdio");
+}
