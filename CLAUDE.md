@@ -144,7 +144,7 @@ In Claude Desktop or Claude Code settings:
     "intervals-icu": {
       "command": "node",
       "args": ["dist/index.js"],
-      "cwd": "C:/Users/jmvw/Proton Drive/fisaga/My files/src/intervals-icu-mcp"
+      "cwd": "C:/data/unsynced/src/intervals-icu-mcp"
     }
   }
 }
@@ -174,6 +174,7 @@ Key endpoints used:
 ## Development Notes
 
 - Build with `npx tsc`. No test framework yet.
-- The server is spawned fresh per tool call (stdio transport) — no persistent process.
+- The server is a long-lived process, not spawned per tool call: Claude Desktop starts it at launch and keeps it running until Desktop quits (observed running 28+ hours). It holds `cache.db` open in WAL mode the whole time, so `cache.db-wal`/`cache.db-shm` are live, locked files while Desktop is running.
+- Keep the repo out of cloud-synced folders (Proton Drive, OneDrive, etc.). It lived in Proton Drive until 2026-09, where sync repeatedly name-clashed the live `cache.db-wal` and silently dropped the `[core]` section from `.git/config`.
 - Error handling maps HTTP status codes to meaningful messages (401 → auth failure, 404 → not found, 429 → rate limited).
 - Activities from Strava are effectively opaque — plan around this limitation.
