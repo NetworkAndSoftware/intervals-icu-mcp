@@ -2,6 +2,7 @@
   "name": "intervals-icu-mcp",
   "version": "1.0.0",
   "description": "MCP server for intervals.icu cycling data",
+  "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
