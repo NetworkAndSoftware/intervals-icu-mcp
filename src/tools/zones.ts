@@ -16,7 +16,7 @@ export function registerZonesTools(
       const cached = cache.get<unknown[]>(cacheKey);
       if (cached) return { content: [{ type: "text", text: JSON.stringify(cached, null, 2) }] };
 
-      const data = await client.getZones();
+      const data = await client.getSportSettings();
       cache.set(cacheKey, data, TTL.ONE_DAY);
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }

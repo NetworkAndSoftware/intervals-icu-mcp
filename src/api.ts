@@ -82,8 +82,55 @@ export class IntervalsClient {
     return this.request<unknown[]>("/wellness", { oldest, newest });
   }
 
-  async getZones() {
+  async getAthlete() {
+    return this.request<unknown>("");
+  }
+
+  async getSportSettings() {
     return this.request<unknown[]>("/sport-settings");
+  }
+
+  async updateAthlete(fields: Record<string, unknown>) {
+    const url = new URL(`${BASE_URL}/athlete/${this.athleteId}`);
+    const res = await fetch(url.toString(), {
+      method: "PUT",
+      headers: {
+        Authorization: this.authHeader,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(fields),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new IntervalsApiError(res.status, res.statusText, text);
+    }
+
+    return (await res.json()) as unknown;
+  }
+
+  // Takes the numeric entry ID: by type name, intervals.icu silently updates the
+  // "Other" entry when no entry lists that type
+  async updateSportSettings(id: number, fields: Record<string, unknown>, recalcHrZones: boolean) {
+    const url = new URL(`${BASE_URL}/athlete/${this.athleteId}/sport-settings/${id}`);
+    url.searchParams.set("recalcHrZones", String(recalcHrZones));
+    const res = await fetch(url.toString(), {
+      method: "PUT",
+      headers: {
+        Authorization: this.authHeader,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(fields),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new IntervalsApiError(res.status, res.statusText, text);
+    }
+
+    return (await res.json()) as unknown;
   }
 
   async uploadActivity(fileBuffer: Buffer, filename: string, name?: string, description?: string) {

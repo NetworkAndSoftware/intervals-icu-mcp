@@ -6,6 +6,7 @@ import { registerFitnessTools } from "./tools/fitness.js";
 import { registerPowerCurveTools } from "./tools/power-curve.js";
 import { registerWellnessTools } from "./tools/wellness.js";
 import { registerZonesTools } from "./tools/zones.js";
+import { registerSettingsTools } from "./tools/settings.js";
 import { registerUploadTools } from "./tools/upload.js";
 import { registerCoachingTools } from "./tools/coaching.js";
 
@@ -24,6 +25,7 @@ export function createMcpServer(
   registerPowerCurveTools(server, client, cache);
   registerWellnessTools(server, client, cache);
   registerZonesTools(server, client, cache);
+  registerSettingsTools(server, client, cache);
   registerUploadTools(server, client, { allowLocalFiles: !remote });
   registerCoachingTools(server, client, cache);
 

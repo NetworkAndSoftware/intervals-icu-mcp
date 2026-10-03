@@ -24,6 +24,7 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | `get_power_curve` | Best power for each duration over a date range |
 | `get_wellness` | Daily wellness (weight, resting HR, HRV, sleep, mood, etc.) |
 | `get_athlete_zones` | Power and HR zone definitions |
+| `get_athlete_settings` | Profile (weight, resting HR, height) and per-sport FTP, LTHR, max HR, zones |
 | `get_coaching_context` | Compact aggregated snapshot for coaching — fitness, planned vs actual, wellness, activities, optional season progression |
 
 ### Write
@@ -33,6 +34,8 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | `update_event` | Update fields on an existing event |
 | `delete_event` | Delete an event by ID |
 | `set_weekly_target` | Set/update weekly load, duration, or distance target |
+| `update_athlete_settings` | Update weight, resting HR, height, or date of birth |
+| `update_sport_settings` | Update a sport's FTP, W′, Pmax, LTHR, max HR, threshold pace, or zones |
 | `upload_activity` | Upload a .fit/.gpx/.tcx file (local server only) |
 | `delete_activity` | Delete an activity by ID |
 

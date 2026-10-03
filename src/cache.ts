@@ -1,6 +1,7 @@
 export interface Cache {
   get<T>(key: string): T | null;
   set(key: string, value: unknown, ttl: number): void;
+  delete(key: string): void;
   clear(): void;
 }
 
@@ -39,6 +40,10 @@ export class MemoryCache implements Cache {
     if (this.entries.size > this.maxEntries) {
       this.entries.delete(this.entries.keys().next().value!);
     }
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
   }
 
   clear(): void {

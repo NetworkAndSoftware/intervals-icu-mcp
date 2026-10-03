@@ -47,6 +47,7 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | `get_power_curve` | Best power for each duration over a date range | 4 hours |
 | `get_wellness` | Daily wellness (weight, resting HR, HRV, sleep, mood, etc.) | 1 hour (today), never (past) |
 | `get_athlete_zones` | Power and HR zone definitions | 24 hours |
+| `get_athlete_settings` | Profile (weight, resting HR, height, DOB, units) + per-sport thresholds (FTP, W′, Pmax, LTHR, max HR, threshold pace) and zones | 24 hours |
 | `get_coaching_context` | Compact aggregated snapshot for LLM coaching — current fitness, planned vs actual, wellness trends, activity summaries, optional season progression | 1–4 hours |
 
 ### Write Tools
@@ -57,6 +58,8 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | `update_event` | Update fields on an existing event |
 | `delete_event` | Delete a planned workout or event by event ID |
 | `set_weekly_target` | Set/update weekly load/duration/distance target (creates or updates TARGET event) |
+| `update_athlete_settings` | Update profile weight, resting HR, height, date of birth |
+| `update_sport_settings` | Update one sport's FTP, indoor FTP, W′, Pmax, LTHR, max HR, threshold pace, HR/power zones |
 | `upload_activity` | Upload a completed activity file (.fit/.gpx/.tcx). Local only — not registered on Lambda |
 | `delete_activity` | Delete an activity by activity ID |
 
@@ -70,6 +73,16 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 
 ### API paths can move without notice (2026-07 and 2026-08 breakage)
 The `/api/v1/athlete/{id}/activities/{activityId}/streams` and `/api/v1/athlete/{id}/power-curve` endpoints from the original docs both started 404ing — intervals.icu moved them to `/api/v1/activity/{activityId}/streams` (no `/athlete/{id}` prefix, activity IDs are global) and `/api/v1/athlete/{id}/activity-power-curves`. `/api/v1/athlete/{id}/zones` also started 404ing and has no direct replacement — zone data now lives on `/api/v1/athlete/{id}/sport-settings`, which returns one entry per activity type (Ride, Run, Rowing, etc.) with `power_zones`, `power_zone_names`, `hr_zones`, `hr_zone_names`, `ftp`, `lthr`, and a lot of other per-sport config alongside the zone fields. If a tool suddenly 404s on every input, don't assume the service is down — fetch the live OpenAPI spec at `https://intervals.icu/api/v1/docs` (JSON) and grep it for the resource name; the static docs page at api-docs.html is a JS app WebFetch can't render, but the spec JSON behind it is authoritative and current.
+
+### Sport settings: updating by type name can hit the wrong entry
+`PUT /sport-settings/{id}` accepts an activity type instead of the numeric ID, but a type no entry lists (e.g. `Kitesurf`) silently updates the **Other** entry instead of failing. `update_sport_settings` therefore lists the entries, matches the type itself, and PUTs by numeric ID. Other behaviour, verified 2026-10 against a throwaway entry:
+- PUT is a partial update: only the fields sent change (same for `PUT /athlete/{id}`, per its `AthleteUpdateDTO`).
+- `recalcHrZones` is a required query param. `true` recomputes `hr_zones` from `lthr` with intervals.icu's default percentages, discarding custom bounds; explicit `hr_zones` in the body win over it.
+- The last HR zone always follows `max_hr`, even with `recalcHrZones=false`.
+- Setting `ftp` on an entry without power zones adds the default ones.
+- Updates don't reprocess existing activities; `PUT /sport-settings/{id}/apply` does that (not exposed).
+
+`GET /athlete/{id}` includes the API key, email and third-party tokens, so `get_athlete_settings` and `update_athlete_settings` return an allowlist of fields, never the raw record.
 
 ### athlete-summary returns followed athletes
 The `/athlete-summary` endpoint returns weekly entries for **all followed athletes** when called with Basic auth (not a bearer token). Each entry has `athlete_id` (e.g. `"i458859"`) and `athlete_name`. Always filter by `athlete_id === client.athleteId` before using any data from this endpoint. Both `get_fitness` and `get_coaching_context` apply this filter. Tools must take the athlete from `client`, never from `process.env`: on Lambda each request acts for whichever user signed in.
@@ -127,6 +140,7 @@ intervals-icu-mcp/
 │       ├── power-curve.ts # get_power_curve
 │       ├── wellness.ts    # get_wellness
 │       ├── zones.ts       # get_athlete_zones
+│       ├── settings.ts    # get_athlete_settings, update_athlete_settings, update_sport_settings
 │       ├── upload.ts      # create_event, update_event, delete_event, delete_activity,
 │       │                  # upload_activity, set_weekly_target
 │       └── coaching.ts    # get_coaching_context (aggregated coaching snapshot)
@@ -175,7 +189,8 @@ The Lambda-hosted server is added in claude.ai instead: Settings → Connectors 
 Docs: https://intervals.icu/api-docs.html
 
 Key endpoints used:
-- `GET /api/v1/athlete/{id}` — athlete profile; `scripts/users.mjs` uses it to validate credentials
+- `GET /api/v1/athlete/{id}` — athlete profile plus `sportSettings`; `scripts/users.mjs` uses it to validate credentials
+- `PUT /api/v1/athlete/{id}` — update profile fields (`icu_weight`, `icu_resting_hr`, `height`, `icu_date_of_birth`)
 - `GET /api/v1/athlete/{id}/activities` — list activities
 - `GET /api/v1/athlete/{id}/activities/{activityId}` — activity detail
 - `GET /api/v1/activity/{activityId}/streams` — streams (not under `/athlete/{id}` — activity IDs are globally unique)
@@ -184,6 +199,7 @@ Key endpoints used:
 - `GET /api/v1/athlete/{id}/activity-power-curves` — power curve (best power per duration for activities in a date range)
 - `GET /api/v1/athlete/{id}/wellness` — wellness
 - `GET /api/v1/athlete/{id}/sport-settings` — zones (per-sport, includes power/HR zones plus other config; `/zones` 404s)
+- `PUT /api/v1/athlete/{id}/sport-settings/{settingsId}?recalcHrZones=` — update one sport's settings (by numeric ID, see Known Issues)
 - `POST /api/v1/athlete/{id}/activities` — upload activity (multipart)
 - `POST /api/v1/athlete/{id}/events` — create event
 - `PUT /api/v1/athlete/{id}/events/{eventId}` — update event
