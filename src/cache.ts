@@ -57,3 +57,29 @@ export class MemoryCache implements Cache {
     this.entries.clear();
   }
 }
+
+// Another athlete's entries in the same cache, for a coach: the tools' cache keys don't
+// include the athlete, so each coached athlete gets their own key prefix
+export class PrefixedCache implements Cache {
+  constructor(private cache: Cache, private prefix: string) {}
+
+  get<T>(key: string): T | null {
+    return this.cache.get<T>(this.prefix + key);
+  }
+
+  set(key: string, value: unknown, ttl: number): void {
+    this.cache.set(this.prefix + key, value, ttl);
+  }
+
+  delete(key: string): void {
+    this.cache.delete(this.prefix + key);
+  }
+
+  deletePrefix(prefix: string): void {
+    this.cache.deletePrefix(this.prefix + prefix);
+  }
+
+  clear(): void {
+    this.cache.deletePrefix(this.prefix);
+  }
+}

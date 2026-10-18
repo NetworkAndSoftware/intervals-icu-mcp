@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-An MCP (Model Context Protocol) server that exposes intervals.icu cycling/rowing data as tools Claude can call. Runs locally via stdio transport for use with Claude Code and Claude Desktop, and can also be deployed to AWS Lambda as an OAuth-protected remote server for claude.ai custom connectors (web and mobile), shared by several athletes who each sign in to their own claude.ai account and see only their own intervals.icu data.
+An MCP (Model Context Protocol) server that exposes intervals.icu cycling/rowing data as tools Claude can call. Runs locally via stdio transport for use with Claude Code and Claude Desktop, and can also be deployed to AWS Lambda as an OAuth-protected remote server for claude.ai custom connectors (web and mobile), shared by several athletes who each sign in to their own claude.ai account and see only their own intervals.icu data and that of the athletes they coach.
 
-The user is an active road cyclist who tracks with a Garmin Edge 840 and Wahoo TICKR chest strap, syncing to Garmin Connect and then to intervals.icu. They also row (EXR/concept2). They race USAC-permitted events and care about power data, training load (CTL/ATL/TSB), and performance trends.
+The user is an active road cyclist who tracks with a Garmin Edge 840 and Wahoo TICKR chest strap, syncing to Garmin Connect and then to intervals.icu. They also row (EXR/concept2). They race USAC-permitted events and care about power data, training load (CTL/ATL/TSB), and performance trends. They also coach several athletes in intervals.icu, so every tool can act on a coached athlete's account too (see Coaching).
 
 ## Tech Stack
 
@@ -63,11 +63,19 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | `upload_activity` | Upload a completed activity file (.fit/.gpx/.tcx). Local only — not registered on Lambda |
 | `delete_activity` | Delete an activity by activity ID |
 
+### Coaching Tools
+
+Every tool above except `clear_cache` also exists as `coach_<name>` (e.g. `coach_get_activities`, `coach_create_event`), which takes an `athlete_id` and does the same for an athlete the user coaches. Plus:
+
+| Tool | Description | Cache TTL |
+|------|-------------|-----------|
+| `coach_list_athletes` | The athletes the user coaches (everyone their account follows), with their athlete IDs | 1 hour |
+
 ### Utility Tools
 
 | Tool | Description |
 |------|-------------|
-| `clear_cache` | Clear the cache so fresh data is fetched (on Lambda: only the current athlete's cache on the instance that handles the call) |
+| `clear_cache` | Clear the cache, coached athletes' data included, so fresh data is fetched (on Lambda: only the current athlete's cache on the instance that handles the call) |
 
 ## Known Issues & Gotchas
 
@@ -83,6 +91,15 @@ The `/api/v1/athlete/{id}/activities/{activityId}/streams` and `/api/v1/athlete/
 - Updates don't reprocess existing activities; `PUT /sport-settings/{id}/apply` does that (not exposed).
 
 `GET /athlete/{id}` includes the API key, email and third-party tokens, so `get_athlete_settings` and `update_athlete_settings` return an allowlist of fields, never the raw record.
+
+### Coaching
+A coach's own API key reaches the accounts of the athletes who accepted them as coach: same Basic auth, with the coached athlete's ID in the path (per the intervals.icu forum; not yet verified against a live coached account as of 2026-10). Other athletes are refused, presumably with a 403, which `IntervalsApiError` explains.
+
+- **Why separate tools:** Claude keeps permission settings per tool (Claude Code allowlists, claude.ai's per-tool "always allow"), so the user approves changes to an athlete's account separately from their own. `src/tools/accounts.ts` registers each tool twice, through `ownTools` and `coachTools`; tool modules call `tools.add(...)` and get the account as the handler's second argument. Descriptions that mention another tool use `tools.name("get_events")` so the coach version points to `coach_get_events`.
+- **`athlete_id`:** must match `/^i?[1-9]\d*$/` (no `0`, which intervals.icu reads as "the key's own athlete", and no path tricks), and must not be the user's own ID.
+- **IDs from another account:** activity streams (`/activity/{id}/streams`) have no athlete in the path, and intervals.icu may not check that an activity or event ID belongs to the athlete in `/athlete/{id}/...` either. Without a check, `delete_event` given a coached athlete's event ID could change their account under the own-account tool's permission. So tools taking an activity or event ID first fetch it and compare its owner (`icu_athlete_id` on activities, `athlete_id` on events) with the account the tool acts on (`getActivity`/`getEvent` in `accounts.ts`). Records without the field are let through.
+- **Coached athletes' clients:** `client.forAthlete(id)` reuses the key, one client per athlete so their own time zone is fetched once ("today" is the coached athlete's date). Never use another server user's key for a coached athlete: the signed-in user's key is what intervals.icu authorizes.
+- **Listing:** `coach_list_athletes` reads the user's own athlete-summary (below) and lists every other athlete in it. intervals.icu doesn't say there which of those the user coaches and which they only follow.
 
 ### athlete-summary returns followed athletes
 The `/athlete-summary` endpoint returns weekly entries for **all followed athletes** when called with Basic auth (not a bearer token). Each entry has `athlete_id` (e.g. `"i458859"`) and `athlete_name`. Always filter by `athlete_id === client.athleteId` before using any data from this endpoint. Both `get_fitness` and `get_coaching_context` apply this filter. Tools must take the athlete from `client`, never from `process.env`: on Lambda each request acts for whichever user signed in.
@@ -139,6 +156,8 @@ intervals-icu-mcp/
 │   ├── dates.ts           # YYYY-MM-DD helpers (addDays, getMonday, todayIn)
 │   ├── types.ts           # TypeScript interfaces (StreamType)
 │   └── tools/
+│       ├── accounts.ts    # Registers each tool for own account + as coach_<name>; owner checks for IDs
+│       ├── athletes.ts    # coach_list_athletes
 │       ├── activities.ts  # get_activities, get_activity, get_activity_streams
 │       ├── fitness.ts     # get_fitness, get_events
 │       ├── power-curve.ts # get_power_curve
@@ -168,6 +187,8 @@ CREATE TABLE cache (
 Use `clear_cache` tool to flush when data seems stale.
 
 Write tools invalidate what they make stale: event writes drop every `events:` key, activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
+
+Coached athletes' data is in the same cache under `coached:{athleteId}:` + the usual key (`PrefixedCache`), so a coach_ write only invalidates that athlete's entries. The athlete list itself is `coached_athletes`.
 
 ### Dates and time zones
 "Today" is the athlete's local date (`client.today()`, from the profile's `timezone`, fetched once per client), never `new Date().toISOString()`: that's UTC, which is already tomorrow from late afternoon in the Americas, so Sunday-evening coaching context showed next week and today's wellness got the never-expires TTL for past days. Date arithmetic lives in `src/dates.ts` and works on `YYYY-MM-DD` strings in UTC, so it doesn't depend on the server's own time zone.
@@ -211,6 +232,7 @@ Key endpoints used:
 - `PUT /api/v1/athlete/{id}/sport-settings/{settingsId}?recalcHrZones=` — update one sport's settings (by numeric ID, see Known Issues)
 - `POST /api/v1/athlete/{id}/activities` — upload activity (multipart)
 - `POST /api/v1/athlete/{id}/events` — create event
+- `GET /api/v1/athlete/{id}/events/{eventId}` — single event (owner check before update/delete)
 - `PUT /api/v1/athlete/{id}/events/{eventId}` — update event
 - `DELETE /api/v1/athlete/{id}/events/{eventId}` — delete event
 - `DELETE /api/v1/athlete/{id}/activities/{activityId}` — delete activity

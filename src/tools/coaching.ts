@@ -1,8 +1,7 @@
 import { z } from "zod";
-import type { IntervalsClient } from "../api.js";
 import { Cache, TTL } from "../cache.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { addDays, dayOfWeek, getMonday } from "../dates.js";
+import type { Tools } from "./accounts.js";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -115,12 +114,8 @@ function buildSeasonEntry(f: any, weekNum: number, targets: any[] | undefined): 
   return entry;
 }
 
-export function registerCoachingTools(
-  server: McpServer,
-  client: IntervalsClient,
-  cache: Cache
-) {
-  server.tool(
+export function registerCoachingTools(tools: Tools) {
+  tools.add(
     "get_coaching_context",
     "Get a compact coaching context snapshot including current fitness/fatigue, this week's planned vs actual training, daily wellness trends, and activity summaries. Designed for LLM coaching conversations. Returns one week by default; use weeks_back for trend analysis. Use season_start for full-season weekly progression including zone distribution.",
     {
@@ -128,7 +123,7 @@ export function registerCoachingTools(
       weeks_back: z.number().int().min(0).max(4).optional().describe("Number of prior completed weeks to include in detailed view (0-4). Default 0 = current week only."),
       season_start: z.string().optional().describe("Start date for season summary (ISO format, e.g. 2026-01-05). When provided, includes a 'season' array with compact weekly summaries showing CTL/ATL/TSB progression, load by sport, and zone distribution. Use a Monday for clean alignment."),
     },
-    async ({ date, weeks_back, season_start }) => {
+    async ({ date, weeks_back, season_start }, { client, cache }) => {
       const refDate = date || await client.today();
       const weeksBack = weeks_back || 0;
 

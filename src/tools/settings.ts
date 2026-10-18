@@ -1,7 +1,6 @@
 import { z } from "zod";
-import type { IntervalsClient } from "../api.js";
-import { Cache, TTL } from "../cache.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { TTL } from "../cache.js";
+import type { Tools } from "./accounts.js";
 
 type Json = Record<string, unknown>;
 
@@ -44,16 +43,12 @@ function summarizeSport(settings: Json): Json {
   return out;
 }
 
-export function registerSettingsTools(
-  server: McpServer,
-  client: IntervalsClient,
-  cache: Cache
-) {
-  server.tool(
+export function registerSettingsTools(tools: Tools) {
+  tools.add(
     "get_athlete_settings",
-    "Get the athlete's general settings: profile (weight in kg, resting HR, height in m, date of birth, display unit preferences) and, for each sport-settings entry, the thresholds — FTP, indoor FTP, W′, Pmax, LTHR, max HR, threshold pace (m/s) — with power zones (upper bounds, % of FTP) and HR zones (upper bounds, bpm). Each sport entry applies to every activity type in its `types` list. Use get_athlete_zones for zone names and the full per-sport configuration.",
+    `Get the athlete's general settings: profile (weight in kg, resting HR, height in m, date of birth, display unit preferences) and, for each sport-settings entry, the thresholds — FTP, indoor FTP, W′, Pmax, LTHR, max HR, threshold pace (m/s) — with power zones (upper bounds, % of FTP) and HR zones (upper bounds, bpm). Each sport entry applies to every activity type in its \`types\` list. Use ${tools.name("get_athlete_zones")} for zone names and the full per-sport configuration.`,
     {},
-    async () => {
+    async (_args, { client, cache }) => {
       const cacheKey = "athlete_settings";
       const cached = cache.get<unknown>(cacheKey);
       if (cached) return { content: [{ type: "text", text: JSON.stringify(cached, null, 2) }] };
@@ -68,7 +63,7 @@ export function registerSettingsTools(
     }
   );
 
-  server.tool(
+  tools.add(
     "update_athlete_settings",
     "Update the athlete's profile settings in intervals.icu. Only provide the fields you want to change. Values are always metric, whatever units the athlete displays.",
     {
@@ -77,7 +72,7 @@ export function registerSettingsTools(
       height_m: z.number().positive().optional().describe("Height in meters"),
       date_of_birth: z.string().optional().describe("Date of birth (ISO format, e.g. 1980-05-31)"),
     },
-    async ({ weight_kg, resting_hr, height_m, date_of_birth }) => {
+    async ({ weight_kg, resting_hr, height_m, date_of_birth }, { client, cache }) => {
       const update: Json = {};
       if (weight_kg != null) update.icu_weight = weight_kg;
       if (resting_hr != null) update.icu_resting_hr = resting_hr;
@@ -93,9 +88,9 @@ export function registerSettingsTools(
     }
   );
 
-  server.tool(
+  tools.add(
     "update_sport_settings",
-    "Update thresholds or zones for one sport in intervals.icu, e.g. max HR, LTHR or FTP for cycling. A sport-settings entry is shared by all activity types in its `types` list (e.g. the Ride entry usually also covers VirtualRide and GravelRide — see get_athlete_settings), so changing it changes all of them. Only provide the fields you want to change. Does not reprocess activities already in intervals.icu.",
+    `Update thresholds or zones for one sport in intervals.icu, e.g. max HR, LTHR or FTP for cycling. A sport-settings entry is shared by all activity types in its \`types\` list (e.g. the Ride entry usually also covers VirtualRide and GravelRide — see ${tools.name("get_athlete_settings")}), so changing it changes all of them. Only provide the fields you want to change. Does not reprocess activities already in intervals.icu.`,
     {
       type: z.string().describe('An activity type in the entry to update, e.g. "Ride", "Run", "Rowing". Use "Other" for the fallback entry that covers types without their own settings.'),
       ftp: z.number().int().positive().optional().describe("Functional threshold power in watts"),
@@ -109,7 +104,7 @@ export function registerSettingsTools(
       power_zones: z.array(z.number().int().positive()).optional().describe("Custom power zones: the upper bound of each zone as % of FTP, ascending. The last value is conventionally 999."),
       recalc_hr_zones: z.boolean().optional().describe("Recompute HR zones from LTHR using intervals.icu's default percentages, replacing the current zone bounds, custom ones included. Defaults to false, which keeps the current bpm bounds. Has no effect when hr_zones is given."),
     },
-    async ({ type, recalc_hr_zones, ...fields }) => {
+    async ({ type, recalc_hr_zones, ...fields }, { client, cache }) => {
       const update: Json = {};
       for (const [k, v] of Object.entries(fields)) {
         if (v != null) update[k] = v;

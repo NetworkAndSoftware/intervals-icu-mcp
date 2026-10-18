@@ -10,6 +10,7 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 - "How has my CTL trended this season?"
 - "Add a Z2 ride for Thursday with 100 TSS planned"
 - "Compare my planned vs actual load for the past 4 weeks"
+- "How did Sam's intervals go yesterday? Move Sam's Thursday workout to Friday" (for athletes you coach)
 
 ## Tools
 
@@ -39,10 +40,20 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | `upload_activity` | Upload a .fit/.gpx/.tcx file (local server only) |
 | `delete_activity` | Delete an activity by ID |
 
+### Coaching
+If you coach athletes in intervals.icu, every tool above also comes in a `coach_` version (`coach_get_activities`, `coach_create_event`, …) that takes the athlete's ID and works on their account instead of yours:
+
+| Tool | Description |
+|------|-------------|
+| `coach_list_athletes` | The athletes you coach, with their athlete IDs |
+| `coach_<tool>` | The same as `<tool>`, for the athlete given by `athlete_id` |
+
+They use your own API key, which intervals.icu lets reach the athletes who've accepted you as their coach. Because they're separate tools, Claude asks for permission for them separately: allowing `delete_event` for your own calendar doesn't allow `coach_delete_event` on an athlete's. The own-account tools also refuse an activity or event ID from another athlete's account, so they can't be used to get around that.
+
 ### Utility
 | Tool | Description |
 |------|-------------|
-| `clear_cache` | Flush the cache |
+| `clear_cache` | Flush the cache (yours and your athletes') |
 
 ## Setup
 
@@ -105,7 +116,7 @@ Restart Claude Desktop after adding or updating the server.
 claude.ai custom connectors, which also appear in the Claude mobile app, need a public HTTPS server. The same code can run on AWS Lambda behind a Function URL, shared by several athletes:
 
 - **Login:** each athlete has their own name and password. The first time they connect, Claude opens a sign-in page on the server. claude.ai connectors only support OAuth or no authentication, so a plain API key header isn't an option.
-- **Data:** each athlete's tools use their own intervals.icu API key, so they only see their own data. The cache is kept separately per athlete too.
+- **Data:** each athlete's tools use their own intervals.icu API key, so they only see their own data and that of the athletes they coach. The cache is kept separately per athlete too.
 - **Secrets:** the athletes' intervals.icu API keys, their passwords and the token-signing secret are stored as encrypted SSM Parameter Store values. They never appear in the function's configuration or in the repo.
 - **Cost:** normally $0, within Lambda's always-free allowance (1M requests and 400,000 GB-seconds a month). Set up an AWS budget alert anyway.
 

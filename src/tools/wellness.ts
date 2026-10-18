@@ -1,21 +1,16 @@
 import { z } from "zod";
-import type { IntervalsClient } from "../api.js";
-import { Cache, TTL } from "../cache.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { TTL } from "../cache.js";
+import type { Tools } from "./accounts.js";
 
-export function registerWellnessTools(
-  server: McpServer,
-  client: IntervalsClient,
-  cache: Cache
-) {
-  server.tool(
+export function registerWellnessTools(tools: Tools) {
+  tools.add(
     "get_wellness",
     "Get wellness entries (weight, resting HR, HRV, sleep, mood, readiness, etc.) for a date range.",
     {
       oldest: z.string().describe("Start date (ISO format, e.g. 2024-01-01)"),
       newest: z.string().describe("End date (ISO format, e.g. 2024-03-01)"),
     },
-    async ({ oldest, newest }) => {
+    async ({ oldest, newest }, { client, cache }) => {
       const today = await client.today();
       const includesToday = newest >= today;
       const ttl = includesToday ? TTL.ONE_HOUR : TTL.NEVER;

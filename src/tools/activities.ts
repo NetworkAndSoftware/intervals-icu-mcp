@@ -1,14 +1,9 @@
 import { z } from "zod";
-import type { IntervalsClient } from "../api.js";
-import { Cache, TTL } from "../cache.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { TTL } from "../cache.js";
+import { getActivity, type Tools } from "./accounts.js";
 
-export function registerActivityTools(
-  server: McpServer,
-  client: IntervalsClient,
-  cache: Cache
-) {
-  server.tool(
+export function registerActivityTools(tools: Tools) {
+  tools.add(
     "get_activities",
     "List activities in a date range. Returns activity summaries including id, date, name, type, duration, distance, TSS, IF, NP, avg power, avg HR.",
     {
@@ -17,7 +12,7 @@ export function registerActivityTools(
       type: z.string().optional().describe('Optional activity type filter (e.g. "Ride", "Run", "VirtualRide")'),
       query: z.string().optional().describe("Optional search string or /regex/ to filter activities by name (case-insensitive)"),
     },
-    async ({ oldest, newest, type, query }) => {
+    async ({ oldest, newest, type, query }, { client, cache }) => {
       const cacheKey = `activities:${oldest}:${newest}${type ? `:${type}` : ""}`;
       const cached = cache.get<unknown[]>(cacheKey);
       let data: unknown[];
@@ -40,31 +35,30 @@ export function registerActivityTools(
     }
   );
 
-  server.tool(
+  tools.add(
     "get_activity",
     "Get full detail for a single activity including intervals, laps, and all summary metrics.",
     {
       id: z.string().describe("Activity ID"),
     },
-    async ({ id }) => {
-      const cacheKey = `activity:${id}`;
-      const cached = cache.get<unknown>(cacheKey);
-      if (cached) return { content: [{ type: "text", text: JSON.stringify(cached, null, 2) }] };
-
-      const data = await client.getActivity(id);
-      cache.set(cacheKey, data, TTL.NEVER);
+    async ({ id }, account) => {
+      const data = await getActivity(account, id);
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
 
-  server.tool(
+  tools.add(
     "get_activity_streams",
     "Get time-series data for an activity (power, heart rate, cadence, GPS, altitude, etc.).",
     {
       id: z.string().describe("Activity ID"),
       types: z.array(z.string()).describe('Stream types to fetch (e.g. ["watts", "heartrate", "cadence", "altitude", "distance", "time"])'),
     },
-    async ({ id, types }) => {
+    async ({ id, types }, account) => {
+      const { client, cache } = account;
+      // The streams path has no athlete in it, so check whose activity this is first
+      await getActivity(account, id);
+
       const typesKey = [...types].sort().join(",");
       const cacheKey = `streams:${id}:${typesKey}`;
       const cached = cache.get<unknown>(cacheKey);

@@ -1,21 +1,16 @@
 import { z } from "zod";
-import type { IntervalsClient } from "../api.js";
-import { Cache, TTL } from "../cache.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { TTL } from "../cache.js";
+import type { Tools } from "./accounts.js";
 
-export function registerFitnessTools(
-  server: McpServer,
-  client: IntervalsClient,
-  cache: Cache
-) {
-  server.tool(
+export function registerFitnessTools(tools: Tools) {
+  tools.add(
     "get_fitness",
     "Get fitness/fatigue summary for a date range. Returns aggregated training data including CTL (fitness), ATL (fatigue), TSB (form), ramp rate, total TSS, time, distance, elevation, calories, eFTP, and time-in-zones. Includes breakdowns by activity category (Ride, Rowing, etc). This data includes ALL activities even those locked by Strava.",
     {
       start: z.string().describe("Start date (ISO format, e.g. 2024-01-01). Use a Monday for weekly alignment."),
       end: z.string().describe("End date (ISO format, e.g. 2024-03-01)"),
     },
-    async ({ start, end }) => {
+    async ({ start, end }, { client, cache }) => {
       const cacheKey = `fitness:${start}:${end}`;
       const cached = cache.get<unknown[]>(cacheKey);
       if (cached) {
@@ -30,16 +25,16 @@ export function registerFitnessTools(
     }
   );
 
-  server.tool(
+  tools.add(
     "get_events",
-    "Get calendar events for a date range, including planned workouts, races and weekly load targets. TARGET events contain load_target fields showing planned TSS by activity type. Use alongside get_fitness to compare planned vs actual training load.",
+    `Get calendar events for a date range, including planned workouts, races and weekly load targets. TARGET events contain load_target fields showing planned TSS by activity type. Use alongside ${tools.name("get_fitness")} to compare planned vs actual training load.`,
     {
       oldest: z.string().describe("Start date (ISO format, e.g. 2024-01-01)"),
       newest: z.string().describe("End date (ISO format, e.g. 2024-03-01)"),
       category: z.string().optional().describe('Only return events of this category, e.g. "WORKOUT", "NOTE", "TARGET", or "RACE" for races of any priority (RACE_A, RACE_B, RACE_C)'),
       include_workout_doc: z.boolean().optional().describe("Include each planned workout's structured steps (workout_doc). Off by default: it is most of the response, and the description holds the same workout as text. Turn it on to copy a workout to another app (e.g. EXR, which takes workout_doc.steps)."),
     },
-    async ({ oldest, newest, category, include_workout_doc }) => {
+    async ({ oldest, newest, category, include_workout_doc }, { client, cache }) => {
       const cacheKey = `events:${oldest}:${newest}`;
       let data = cache.get<Record<string, unknown>[]>(cacheKey);
       if (!data) {

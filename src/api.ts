@@ -7,11 +7,25 @@ export class IntervalsClient {
   readonly athleteId: string;
   private authHeader: string;
   private timeZone?: Promise<string | undefined>;
+  private coached = new Map<string, IntervalsClient>();
 
   constructor(athleteId: string, apiKey: string) {
     this.athleteId = athleteId;
     this.authHeader =
       "Basic " + Buffer.from(`API_KEY:${apiKey}`).toString("base64");
+  }
+
+  // The same API key acting on another athlete's account. intervals.icu lets a coach's key
+  // reach the athletes who accepted them as their coach, and refuses any other athlete.
+  // Kept per athlete, so their time zone is fetched once.
+  forAthlete(athleteId: string): IntervalsClient {
+    let client = this.coached.get(athleteId);
+    if (!client) {
+      client = new IntervalsClient(athleteId, "");
+      client.authHeader = this.authHeader;
+      this.coached.set(athleteId, client);
+    }
+    return client;
   }
 
   private async request<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
@@ -74,6 +88,10 @@ export class IntervalsClient {
 
   async getEvents(oldest: string, newest: string) {
     return this.request<unknown[]>("/events", { oldest, newest });
+  }
+
+  async getEvent(id: number) {
+    return this.request<unknown>(`/events/${id}`);
   }
 
   async getPowerCurve(oldest: string, newest: string) {
@@ -254,6 +272,7 @@ export class IntervalsApiError extends Error {
   ) {
     let msg = `intervals.icu API error: ${status} ${statusText}`;
     if (status === 401) msg = "Authentication failed — check your INTERVALS_ATHLETE_ID and INTERVALS_API_KEY";
+    else if (status === 403) msg = "Access denied — for another athlete's account, check that they've accepted you as their coach";
     else if (status === 404) msg = "Resource not found — check the activity ID or endpoint";
     else if (status === 429) msg = "Rate limited — try again in a moment";
     else if (body) msg += ` — ${body.slice(0, 200)}`;
