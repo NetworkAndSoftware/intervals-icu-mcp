@@ -54,8 +54,8 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 
 | Tool | Description |
 |------|-------------|
-| `create_event` | Create a workout, race (A/B/C priority), target, note, or holiday/sick/injured day on the calendar |
-| `update_event` | Update fields on an existing event |
+| `create_event` | Create any calendar event: workout, race (A/B/C priority), note, target, holiday/sick/injured period, season start, SET_EFTP/SET_FITNESS/FITNESS_DAYS. Shares its fields with `update_event` |
+| `update_event` | Change any field of an existing event: date, start time, end date, category, workout structure (description or file), indoor, entered, tags, availability, etc.; remove attachments |
 | `delete_event` | Delete a planned workout or event by event ID |
 | `set_weekly_target` | Set/update weekly load/duration/distance target (creates or updates TARGET event) |
 | `update_athlete_settings` | Update profile weight, resting HR, height, date of birth |
@@ -108,7 +108,15 @@ The `/athlete-summary` endpoint returns weekly entries for **all followed athlet
 Activities sourced from Strava (`source: "STRAVA"`) return no name, type, TSS, or any useful data via the API. This is a Strava API licensing restriction. The `get_fitness` endpoint includes their load in aggregates, but individual activity detail is inaccessible. Workaround: delete and re-upload the `.fit` file directly so it comes in as `FILE_UPLOAD`.
 
 ### Event categories
-There is no `RACE` or `REST_DAY` category: races are `RACE_A`, `RACE_B` or `RACE_C` (priority), and days off are `HOLIDAY`, `SICK` or `INJURED`. Other values in use on calendars: `WORKOUT`, `NOTE`, `TARGET`, `SEASON_START`, `FITNESS_DAYS`. An unknown category doesn't get a validation error — the POST fails with a bare `400 {"error":"JSON parse error"}` (verified 2026-10 for `RACE` and `REST_DAY`).
+There is no `RACE` or `REST_DAY` category: races are `RACE_A`, `RACE_B` or `RACE_C` (priority), and days off are `HOLIDAY`, `SICK` or `INJURED`. The others: `WORKOUT`, `NOTE`, `TARGET`, `SEASON_START`, `SET_EFTP`, `SET_FITNESS`, `FITNESS_DAYS` (plus `PLAN`, made by applying a plan). An unknown category doesn't get a validation error — the POST fails with a bare `400 {"error":"JSON parse error"}` (verified 2026-10 for `RACE` and `REST_DAY`).
+
+### Updating events (verified 2026-10 against throwaway events)
+`PUT /events/{id}` is a partial update: fields left out or `null` keep their value, `""` clears a text field (`color`, `description`), `[]` clears `tags`/`attachments`. Unlike `POST /events`, its 422s carry a real message (`{"error":"type is required for category RACE_A"}`), which `IntervalsApiError` passes on.
+- **Dates:** `end_date_local` is exclusive (a one-day event ends at midnight the next day). Moving `start_date_local` moves a one-day event's end with it but leaves a multi-day event's end where it was, so `update_event` shifts it itself.
+- **Time of day:** only workouts and races keep a time in `start_date_local`; notes and days off are reset to midnight. A timed event's end is start + `moving_time` (1 h without one) and can't be set. Sending a date with `T00:00:00` makes the event all-day again, so `update_event` keeps the current time when only the date changes.
+- **Category:** workouts, races, notes and days off convert freely, but workouts and races need `type`, and only `WORKOUT` may have a `sub_type`. `TARGET`, `SEASON_START`, `SET_EFTP`, `SET_FITNESS` and `FITNESS_DAYS` events can't change category at all (`SET_FITNESS`/`FITNESS_DAYS` also rename themselves, e.g. "Fitness 42d Fatigue 7d").
+- **Structure:** a changed `description` is re-parsed into `workout_doc`, `moving_time` and `icu_training_load` (overriding a load set earlier). A workout file (`filename` + `file_contents_base64`) also works and replaces the name and description. Writing `workout_doc` directly changes the steps but not the description, duration or load, so it isn't exposed.
+- **Attachments:** files are uploaded with `POST /api/attachment` (multipart, 20 MB), which isn't in the public API and returns 401 for the API key, so only the web app can add them. `PUT` accepts `attachments` only as full objects from that upload (`id`, `filename`, `mimetype`, `url`); `update_event` can therefore only remove them, by sending the rest.
 
 ### API field name mismatches for events
 The intervals.icu UI reads different fields than what the API names suggest for planned workout targets:
@@ -186,7 +194,7 @@ CREATE TABLE cache (
 
 Use `clear_cache` tool to flush when data seems stale.
 
-Write tools invalidate what they make stale: event writes drop every `events:` key, activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
+Write tools invalidate what they make stale: event writes drop every `events:` and `fitness:` key (SET_FITNESS, SET_EFTP and FITNESS_DAYS events change the fitness numbers), activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
 
 Coached athletes' data is in the same cache under `coached:{athleteId}:` + the usual key (`PrefixedCache`), so a coach_ write only invalidates that athlete's entries. The athlete list itself is `coached_athletes`.
 
@@ -232,8 +240,8 @@ Key endpoints used:
 - `PUT /api/v1/athlete/{id}/sport-settings/{settingsId}?recalcHrZones=` — update one sport's settings (by numeric ID, see Known Issues)
 - `POST /api/v1/athlete/{id}/activities` — upload activity (multipart)
 - `POST /api/v1/athlete/{id}/events` — create event
-- `GET /api/v1/athlete/{id}/events/{eventId}` — single event (owner check before update/delete)
-- `PUT /api/v1/athlete/{id}/events/{eventId}` — update event
+- `GET /api/v1/athlete/{id}/events/{eventId}` — one event (owner check before update/delete; `update_event` also uses it to move events and remove attachments)
+- `PUT /api/v1/athlete/{id}/events/{eventId}` — update event (partial, see Known Issues)
 - `DELETE /api/v1/athlete/{id}/events/{eventId}` — delete event
 - `DELETE /api/v1/athlete/{id}/activities/{activityId}` — delete activity
 

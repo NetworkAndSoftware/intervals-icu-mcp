@@ -31,8 +31,8 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 ### Write
 | Tool | Description |
 |------|-------------|
-| `create_event` | Create a workout, race (A/B/C priority), target, note, or holiday/sick/injured day |
-| `update_event` | Update fields on an existing event |
+| `create_event` | Create a workout, race (A/B/C priority), target, note, holiday/sick/injured period, season start, or fitness-model change (eFTP, CTL/ATL, time constants) |
+| `update_event` | Move an event (date, start time, end of a multi-day event) or change its category, workout structure, indoor/outdoor, race entered, tags and other fields; remove attachments |
 | `delete_event` | Delete an event by ID |
 | `set_weekly_target` | Set/update weekly load, duration, or distance target |
 | `update_athlete_settings` | Update weight, resting HR, height, or date of birth |

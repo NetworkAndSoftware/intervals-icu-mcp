@@ -1,12 +1,15 @@
 import { z } from "zod";
 import { readFile } from "fs/promises";
 import type { Cache } from "../cache.js";
-import { addDays, dayOfWeek } from "../dates.js";
+import { addDays, dayOfWeek, daysBetween } from "../dates.js";
 import { getActivity, getEvent, type Tools } from "./accounts.js";
 
 // Writes must drop what they make stale, or reads keep serving the old data for up to
-// the TTL (forever, for a single activity)
-const eventsChanged = (cache: Cache) => cache.deletePrefix("events:");
+// the TTL (forever, for a single activity). SET_FITNESS, SET_EFTP and FITNESS_DAYS
+// events change the fitness numbers too.
+const eventsChanged = (cache: Cache) => {
+  for (const prefix of ["events:", "fitness:"]) cache.deletePrefix(prefix);
+};
 const activitiesChanged = (cache: Cache, id?: string) => {
   for (const prefix of ["activities:", "fitness:", "power_curve:"]) cache.deletePrefix(prefix);
   if (id) {
@@ -14,6 +17,73 @@ const activitiesChanged = (cache: Cache, id?: string) => {
     cache.deletePrefix(`streams:${id}:`);
   }
 };
+
+// intervals.icu rejects unknown categories (e.g. "RACE", "REST_DAY") with a bare "JSON parse error"
+const CATEGORIES = [
+  "WORKOUT", "RACE_A", "RACE_B", "RACE_C", "NOTE", "TARGET", "HOLIDAY", "SICK", "INJURED",
+  "SEASON_START", "SET_EFTP", "SET_FITNESS", "FITNESS_DAYS",
+] as const;
+
+// Fields create_event and update_event share, named as the API (and get_events) names them.
+// Updates are partial: fields left out keep their value, "" clears a text field, [] clears tags.
+const eventFields = {
+  name: z.string().optional().describe("Event name"),
+  description: z.string().optional().describe("Notes. For a WORKOUT this is also the workout itself, in intervals.icu's workout text: one step per line ('- 15m 55%', '- 5m 95-105% 90rpm'), with 'Nx' on its own line before steps to repeat them. intervals.icu rebuilds the structure, duration and load from it; other lines stay as notes"),
+  type: z.string().optional().describe('Activity type, e.g. "Ride", "VirtualRide", "Run", "Rowing". Required for workouts, races and SET_EFTP'),
+  start_time: z.string().regex(/^(([01]\d|2[0-3]):[0-5]\d)?$/).optional().describe('Local start time, HH:MM (e.g. "07:30"), or "" for all day. Only workouts and races keep a time'),
+  end_date: z.string().optional().describe("Last day (inclusive) of a multi-day event such as a holiday, sick or injured period (ISO format)"),
+  load_target: z.number().optional().describe("Planned training load (TSS)"),
+  time_target: z.number().optional().describe("Planned duration in seconds"),
+  distance_target: z.number().optional().describe("Planned distance in meters"),
+  indoor: z.boolean().optional().describe("Indoor (true) or outdoor (false)"),
+  color: z.string().optional().describe("Calendar color, e.g. 'red' or '#ff0000'"),
+  tags: z.array(z.string()).optional().describe("Tags (replace the existing ones)"),
+  entered: z.boolean().optional().describe("Races: whether the athlete has entered (signed up for) it"),
+  sub_type: z.enum(["NONE", "COMMUTE", "WARMUP", "COOLDOWN", "RACE"]).optional().describe("Workouts only: sub type"),
+  target: z.enum(["AUTO", "POWER", "HR", "PACE"]).optional().describe("Workouts: what the steps target on a Garmin device"),
+  carbs_per_hour: z.number().int().optional().describe("Workouts: planned carbohydrate intake, g/h"),
+  for_week: z.boolean().optional().describe("Notes: show the note for the whole week"),
+  show_on_ctl_line: z.boolean().optional().describe("Show on the fitness line of the fitness chart (races, notes, days off)"),
+  show_as_note: z.boolean().optional().describe("Show as a note on the fitness chart"),
+  not_on_fitness_chart: z.boolean().optional().describe("Leave off the fitness chart"),
+  training_availability: z.enum(["NORMAL", "LIMITED", "UNAVAILABLE"]).optional().describe("HOLIDAY, SICK, INJURED: how much training is possible"),
+  max_training_time: z.number().int().optional().describe("Days off with LIMITED availability: most training time per day, in seconds"),
+  can_train_sports: z.array(z.string()).optional().describe('Days off with LIMITED availability: sports still possible, e.g. ["Ride", "Rowing"]'),
+  icu_ftp: z.number().int().optional().describe("SET_EFTP: FTP in watts from this date"),
+  w_prime: z.number().int().optional().describe("SET_EFTP: W′ in joules"),
+  p_max: z.number().int().optional().describe("SET_EFTP: Pmax in watts"),
+  icu_ctl: z.number().optional().describe("SET_FITNESS: fitness (CTL) on this date"),
+  icu_atl: z.number().optional().describe("SET_FITNESS: fatigue (ATL) on this date"),
+  ctl_days: z.number().int().optional().describe("FITNESS_DAYS: fitness (CTL) time constant in days (default 42)"),
+  atl_days: z.number().int().optional().describe("FITNESS_DAYS: fatigue (ATL) time constant in days (default 7)"),
+  file_path: z.string().optional().describe("Absolute path to a workout file (.zwo, .mrc, .erg, .fit) to use as the workout; its name and steps replace the event's name and description"),
+};
+
+// The calendar shows icu_training_load, moving_time and distance rather than the *_target
+// fields the API takes, so set both
+function eventBody(fields: Record<string, unknown>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v != null) body[k] = v;
+  }
+  if (body.load_target != null) body.icu_training_load = body.load_target;
+  if (body.time_target != null) body.moving_time = body.time_target;
+  if (body.distance_target != null) body.distance = body.distance_target;
+  return body;
+}
+
+// end_date_local is exclusive: a one-day event ends at midnight the next day
+const endDateLocal = (lastDay: string) => `${addDays(lastDay, 1)}T00:00:00`;
+
+const fail = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
+
+async function readWorkoutFile(file_path: string) {
+  const fileBuffer = await readFile(file_path);
+  return {
+    filename: file_path.replace(/\\/g, "/").split("/").pop() || "workout.fit",
+    file_contents_base64: fileBuffer.toString("base64"),
+  };
+}
 
 export function registerUploadTools(
   tools: Tools,
@@ -38,58 +108,30 @@ export function registerUploadTools(
     }
   );
 
+  const noLocalFiles = fail("file_path is not supported on the remote server");
+
   tools.add(
     "create_event",
-    "Create an event on the intervals.icu calendar. Events include planned workouts, targets, notes, races, and more.",
+    "Create an event on the intervals.icu calendar: a planned workout, race (A/B/C priority), note, weekly target, day off (holiday, sick, injured), season start, or a change to the fitness model (SET_EFTP, SET_FITNESS, FITNESS_DAYS).",
     {
       start_date: z.string().describe("Date for the event (ISO format, e.g. 2024-01-15)"),
-      // intervals.icu rejects unknown categories (e.g. "RACE", "REST_DAY") with a bare "JSON parse error"
-      category: z
-        .enum(["WORKOUT", "RACE_A", "RACE_B", "RACE_C", "TARGET", "NOTE", "HOLIDAY", "SICK", "INJURED"])
-        .describe("Event category. Races carry their priority: RACE_A (goal race), RACE_B, RACE_C. HOLIDAY, SICK and INJURED mark days off training"),
+      category: z.enum(CATEGORIES).describe("Event category. Races carry their priority: RACE_A (goal race), RACE_B, RACE_C. HOLIDAY, SICK and INJURED mark days off training"),
+      ...eventFields,
       name: z.string().describe("Event name"),
-      type: z.string().optional().describe('Activity type (e.g. "Ride", "Run", "Swim", "Rowing"). Defaults to "Ride"'),
-      load_target: z.number().optional().describe("Planned training load (TSS)"),
-      time_target: z.number().optional().describe("Planned duration in seconds"),
-      distance_target: z.number().optional().describe("Planned distance in meters"),
-      description: z.string().optional().describe("Optional description/notes"),
-      color: z.string().optional().describe("Optional color for the calendar event (e.g. 'red', '#ff0000')"),
-      indoor: z.boolean().optional().describe("Whether this is an indoor workout"),
-      file_path: z.string().optional().describe("Optional: absolute path to a workout file (.fit, .zwo, .mrc, .erg)"),
+      type: eventFields.type.describe('Activity type, e.g. "Ride", "VirtualRide", "Run", "Rowing". Defaults to "Ride"'),
     },
-    async ({ start_date, category, name, type, load_target, time_target, distance_target, description, color, indoor, file_path }, { client, cache }) => {
+    async ({ start_date, category, start_time, end_date, file_path, ...fields }, { client, cache }) => {
+      if (file_path && !allowLocalFiles) return noLocalFiles;
+      if (end_date && end_date < start_date) return fail(`end_date ${end_date} is before start_date ${start_date}`);
+
       const event: Record<string, unknown> = {
+        ...eventBody(fields),
         category,
-        start_date_local: `${start_date}T00:00:00`,
-        name,
-        type: type || "Ride",
+        start_date_local: `${start_date}T${start_time || "00:00"}:00`,
       };
-
-      if (load_target != null) {
-        event.load_target = load_target;
-        event.icu_training_load = load_target;
-      }
-      if (time_target != null) {
-        event.time_target = time_target;
-        event.moving_time = time_target;
-      }
-      if (distance_target != null) {
-        event.distance_target = distance_target;
-        event.distance = distance_target;
-      }
-      if (description) event.description = description;
-      if (color) event.color = color;
-      if (indoor != null) event.indoor = indoor;
-
-      if (file_path) {
-        if (!allowLocalFiles) {
-          return { content: [{ type: "text", text: "file_path is not supported on the remote server" }], isError: true };
-        }
-        const fileBuffer = await readFile(file_path);
-        const filename = file_path.replace(/\\/g, "/").split("/").pop() || "workout.fit";
-        event.filename = filename;
-        event.file_contents_base64 = fileBuffer.toString("base64");
-      }
+      event.type ??= "Ride";
+      if (end_date) event.end_date_local = endDateLocal(end_date);
+      if (file_path) Object.assign(event, await readWorkoutFile(file_path));
 
       const result = await client.createEvent(event);
       eventsChanged(cache);
@@ -99,35 +141,58 @@ export function registerUploadTools(
 
   tools.add(
     "update_event",
-    "Update an existing planned workout or event on the intervals.icu calendar. Only provide the fields you want to change.",
+    "Update an existing event on the intervals.icu calendar (workout, race, note, target, day off, ...): move it to another date or time, change its category, structure or any other field. Only the fields you pass change; \"\" clears a text field and [] clears tags.",
     {
       id: z.number().describe(`The event ID to update (numeric, from ${tools.name("get_events")})`),
-      name: z.string().optional().describe("New workout name"),
-      description: z.string().optional().describe("New description/notes"),
-      load_target: z.number().optional().describe("Planned training load (TSS)"),
-      time_target: z.number().optional().describe("Planned duration in seconds"),
-      distance_target: z.number().optional().describe("Planned distance in meters"),
-      color: z.string().optional().describe("Calendar event color"),
-      indoor: z.boolean().optional().describe("Whether this is an indoor workout"),
-      type: z.string().optional().describe('Activity type (e.g. "Ride", "Run", "Rowing")'),
+      start_date: z.string().optional().describe("Move the event to this date (ISO format). Keeps its start time and, for a multi-day event, its length"),
+      category: z.enum(CATEGORIES).optional().describe("New category, e.g. RACE_B → RACE_A, or NOTE → WORKOUT (needs type). TARGET, SEASON_START, SET_EFTP, SET_FITNESS and FITNESS_DAYS events can't change category"),
+      ...eventFields,
+      remove_attachments: z.array(z.string()).optional().describe("IDs or filenames of attachments to remove. Attachments can only be added in the intervals.icu web app"),
     },
-    async ({ id, ...fields }, account) => {
+    async ({ id, start_date, start_time, end_date, category, file_path, remove_attachments, ...fields }, account) => {
       const { client, cache } = account;
-      await getEvent(account, id);
+      if (file_path && !allowLocalFiles) return noLocalFiles;
+      // Also checks the event is this athlete's. Moving it and removing attachments start
+      // from what's there now.
+      const current = await getEvent(account, id);
 
-      const update: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(fields)) {
-        if (v != null) update[k] = v;
+      const update = eventBody(fields);
+      if (category) update.category = category;
+
+      if (start_date != null || start_time != null || end_date != null || remove_attachments?.length) {
+        const [currentDate, currentTime] = String(current.start_date_local).split("T");
+        const date = start_date ?? currentDate;
+
+        // A date alone would reset the time to midnight
+        if (start_date != null || start_time != null) {
+          const time = start_time == null ? currentTime : start_time ? `${start_time}:00` : "00:00:00";
+          update.start_date_local = `${date}T${time}`;
+        }
+
+        if (end_date != null) {
+          if (end_date < date) return fail(`end_date ${end_date} is before the start date ${date}`);
+          update.end_date_local = endDateLocal(end_date);
+        } else if (start_date != null && current.end_date_local) {
+          // intervals.icu moves a one-day event's end along with its start, but not a multi-day one's
+          const span = daysBetween(currentDate, String(current.end_date_local).slice(0, 10));
+          if (span > 1) update.end_date_local = endDateLocal(addDays(date, span - 1));
+        }
+
+        if (remove_attachments?.length) {
+          // The API takes the attachments to keep, each as the full object it returned
+          const attachments = (current.attachments ?? []) as { id: string; filename: string }[];
+          const keep = attachments.filter(a => !remove_attachments.includes(a.id) && !remove_attachments.includes(a.filename));
+          if (keep.length === attachments.length) {
+            const list = attachments.map(a => `${a.filename} (${a.id})`).join(", ");
+            return fail(`No attachment matches ${remove_attachments.join(", ")}. The event has ${list || "no attachments"}`);
+          }
+          update.attachments = keep;
+        }
       }
-      if (update.load_target != null) {
-        update.icu_training_load = update.load_target;
-      }
-      if (update.time_target != null) {
-        update.moving_time = update.time_target;
-      }
-      if (update.distance_target != null) {
-        update.distance = update.distance_target;
-      }
+
+      if (file_path) Object.assign(update, await readWorkoutFile(file_path));
+      if (!Object.keys(update).length) return fail("Nothing to update: pass at least one field to change");
+
       const result = await client.updateEvent(id, update);
       eventsChanged(cache);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
