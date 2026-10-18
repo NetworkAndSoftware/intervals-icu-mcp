@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TTL } from "../cache.js";
-import { getActivity, type Tools } from "./accounts.js";
+import { activityId, getActivity, type Tools } from "./accounts.js";
 
 export function registerActivityTools(tools: Tools) {
   tools.add(
@@ -39,7 +39,7 @@ export function registerActivityTools(tools: Tools) {
     "get_activity",
     "Get full detail for a single activity including intervals, laps, and all summary metrics.",
     {
-      id: z.string().describe("Activity ID"),
+      id: activityId.describe("Activity ID"),
     },
     async ({ id }, account) => {
       const data = await getActivity(account, id);
@@ -51,7 +51,7 @@ export function registerActivityTools(tools: Tools) {
     "get_activity_streams",
     "Get time-series data for an activity (power, heart rate, cadence, GPS, altitude, etc.).",
     {
-      id: z.string().describe("Activity ID"),
+      id: activityId.describe("Activity ID"),
       types: z.array(z.string()).describe('Stream types to fetch (e.g. ["watts", "heartrate", "cadence", "altitude", "distance", "time"])'),
     },
     async ({ id, types }, account) => {

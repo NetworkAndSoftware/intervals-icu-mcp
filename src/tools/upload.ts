@@ -2,7 +2,7 @@ import { z } from "zod";
 import { readFile } from "fs/promises";
 import type { Cache } from "../cache.js";
 import { addDays, dayOfWeek, daysBetween } from "../dates.js";
-import { getActivity, getEvent, type Tools } from "./accounts.js";
+import { activityId, getActivity, getEvent, type Tools } from "./accounts.js";
 
 // Writes must drop what they make stale, or reads keep serving the old data for up to
 // the TTL (forever, for a single activity). SET_FITNESS, SET_EFTP and FITNESS_DAYS
@@ -253,7 +253,7 @@ export function registerUploadTools(
     "delete_activity",
     "Delete an activity from intervals.icu by its activity ID. Use with caution — this is irreversible.",
     {
-      id: z.string().describe("The activity ID to delete"),
+      id: activityId.describe("The activity ID to delete"),
     },
     async ({ id }, account) => {
       await getActivity(account, id);

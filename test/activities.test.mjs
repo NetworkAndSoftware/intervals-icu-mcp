@@ -145,3 +145,48 @@ test("get_activity_streams refuses another account's activity", async () => {
   assert.match(result.text, /belongs to athlete i200/);
   assert.deepEqual(requests, [get(ME, "i555")]);
 });
+
+// Activity IDs go into URL paths unescaped, so anything else could reach another path
+const BAD_IDS = [
+  `../../../../../../api/v1/athlete/${OTHER}/events/5`,
+  // Without the check, this made delete_activity a range delete of another athlete's calendar
+  `../../../../../../api/v1/athlete/${OTHER}/events?oldest=2026-01-01&category=WORKOUT`,
+  `i555/../../athlete/${OTHER}/events/5`,
+  "i555,i556",
+  "i555?oldest=2026-01-01",
+  "%2e%2e%2fi556",
+  "i555 ",
+  "i0",
+  "",
+];
+
+test("tools taking an activity ID refuse anything else, before sending a request", async () => {
+  const requests = fakeIntervals({});
+  const client = await connect();
+  const tools = [
+    ["get_activity", {}],
+    ["get_activity_streams", { types: ["watts"] }],
+    ["delete_activity", {}],
+    ["coach_get_activity", { athlete_id: COACHED }],
+    ["coach_get_activity_streams", { athlete_id: COACHED, types: ["watts"] }],
+    ["coach_delete_activity", { athlete_id: COACHED }],
+  ];
+  for (const [name, args] of tools) {
+    for (const id of BAD_IDS) {
+      const result = await call(client, name, { ...args, id });
+      assert.equal(result.isError, true, `${name} took ${JSON.stringify(id)}`);
+      assert.match(result.text, /activity ID/);
+    }
+  }
+  assert.deepEqual(requests, []);
+});
+
+test("delete_activity takes a Strava activity's numeric ID", async () => {
+  const requests = fakeIntervals({
+    [`GET ${API}/athlete/${ME}/activities/12345678901`]: [{ id: "12345678901", icu_athlete_id: ME, source: "STRAVA" }],
+    [`DELETE ${API}/activity/12345678901`]: { id: "12345678901" },
+  });
+  const result = await call(await connect(), "delete_activity", { id: "12345678901" });
+  assert.equal(result.isError, false, result.text);
+  assert.deepEqual(requests, [get(ME, "12345678901"), del("12345678901")]);
+});

@@ -64,6 +64,11 @@ export function coachTools(server: McpServer, own: Account): Tools {
   };
 }
 
+// Activity IDs go into URL paths as they are, so one like "../../athlete/i2/events/5" would
+// reach another path, past the owner check below. intervals.icu's own IDs are "i" + digits;
+// activities from Strava keep their numeric Strava ID.
+export const activityId = z.string().regex(/^i?[1-9]\d*$/, 'An intervals.icu activity ID, like "i12345"');
+
 // intervals.icu may not check that an activity or event ID belongs to the athlete in the
 // request path (activity streams don't even have one in theirs), so a tool given an ID from
 // another account's data could act on that account, bypassing the permission settings of the
