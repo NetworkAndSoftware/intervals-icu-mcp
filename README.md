@@ -30,7 +30,7 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 ### Write
 | Tool | Description |
 |------|-------------|
-| `create_event` | Create a workout, target, note, race, or rest day |
+| `create_event` | Create a workout, race (A/B/C priority), target, note, or holiday/sick/injured day |
 | `update_event` | Update fields on an existing event |
 | `delete_event` | Delete an event by ID |
 | `set_weekly_target` | Set/update weekly load, duration, or distance target |

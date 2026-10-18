@@ -31,7 +31,10 @@ export function registerUploadTools(
     "Create an event on the intervals.icu calendar. Events include planned workouts, targets, notes, races, and more.",
     {
       start_date: z.string().describe("Date for the event (ISO format, e.g. 2024-01-15)"),
-      category: z.enum(["WORKOUT", "TARGET", "NOTE", "RACE", "REST_DAY"]).describe("Event category"),
+      // intervals.icu rejects unknown categories (e.g. "RACE", "REST_DAY") with a bare "JSON parse error"
+      category: z
+        .enum(["WORKOUT", "RACE_A", "RACE_B", "RACE_C", "TARGET", "NOTE", "HOLIDAY", "SICK", "INJURED"])
+        .describe("Event category. Races carry their priority: RACE_A (goal race), RACE_B, RACE_C. HOLIDAY, SICK and INJURED mark days off training"),
       name: z.string().describe("Event name"),
       type: z.string().optional().describe('Activity type (e.g. "Ride", "Run", "Swim", "Rowing"). Defaults to "Ride"'),
       load_target: z.number().optional().describe("Planned training load (TSS)"),

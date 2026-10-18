@@ -54,7 +54,7 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 
 | Tool | Description |
 |------|-------------|
-| `create_event` | Create a workout, target, note, race, or rest day on the calendar |
+| `create_event` | Create a workout, race (A/B/C priority), target, note, or holiday/sick/injured day on the calendar |
 | `update_event` | Update fields on an existing event |
 | `delete_event` | Delete a planned workout or event by event ID |
 | `set_weekly_target` | Set/update weekly load/duration/distance target (creates or updates TARGET event) |
@@ -89,6 +89,9 @@ The `/athlete-summary` endpoint returns weekly entries for **all followed athlet
 
 ### Strava-locked activities
 Activities sourced from Strava (`source: "STRAVA"`) return no name, type, TSS, or any useful data via the API. This is a Strava API licensing restriction. The `get_fitness` endpoint includes their load in aggregates, but individual activity detail is inaccessible. Workaround: delete and re-upload the `.fit` file directly so it comes in as `FILE_UPLOAD`.
+
+### Event categories
+There is no `RACE` or `REST_DAY` category: races are `RACE_A`, `RACE_B` or `RACE_C` (priority), and days off are `HOLIDAY`, `SICK` or `INJURED`. Other values in use on calendars: `WORKOUT`, `NOTE`, `TARGET`, `SEASON_START`, `FITNESS_DAYS`. An unknown category doesn't get a validation error — the POST fails with a bare `400 {"error":"JSON parse error"}` (verified 2026-10 for `RACE` and `REST_DAY`).
 
 ### API field name mismatches for events
 The intervals.icu UI reads different fields than what the API names suggest for planned workout targets:
