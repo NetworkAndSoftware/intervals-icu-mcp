@@ -39,9 +39,10 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 
 | Tool | Description | Cache TTL |
 |------|-------------|-----------|
-| `get_activities` | List activities in date range. Supports `type` filter and `query` (string or `/regex/`) | 1 hour |
-| `get_activity` | Full detail for a single activity | Never expires |
+| `get_activities` | List activities in date range. Supports `type` filter, `query` (string or `/regex/`), exact `source` and `oauth_client_name` filters, and `fields` to return only some fields (plus `id`) | 1 hour |
+| `get_activity` | Full detail for a single activity, with its intervals (nulls dropped from them) | Never expires |
 | `get_activity_streams` | Time-series data (watts, HR, cadence, etc.) | Never expires |
+| `analyze_activity_window` | Numbers for sections of a ride (by time, distance or GPS point): avg power, NP, HR, kJ above a threshold and CP, W′ balance (Skiba differential, from the ride start), computed from the streams on the server | Never expires (streams) |
 | `get_fitness` | Weekly fitness summaries (CTL/ATL/TSB, ramp rate, zone times, by-category breakdowns) | 4 hours |
 | `get_events` | Calendar events (planned workouts, races, targets, notes). Optional `category` filter; drops nulls, and `workout_doc` unless `include_workout_doc` | 1 hour |
 | `get_power_curve` | Best power for each duration over a date range | 4 hours |
@@ -55,7 +56,7 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | Tool | Description |
 |------|-------------|
 | `create_event` | Create any calendar event: workout, race (A/B/C priority), note, target, holiday/sick/injured period, season start, SET_EFTP/SET_FITNESS/FITNESS_DAYS. Shares its fields with `update_event` |
-| `update_event` | Change any field of an existing event: date, start time, end date, category, workout structure (description or file), indoor, entered, tags, availability, etc.; remove attachments |
+| `update_event` | Change any field of an existing event: date, start time (`start_date`/`start_time`, or `start_date_local` as `get_events` shows it), end date, category, workout structure (description or file), indoor, entered, tags, availability, etc.; remove attachments. Keeps type, duration and load when only the name or description changes |
 | `delete_event` | Delete a planned workout or event by event ID |
 | `set_weekly_target` | Set/update weekly load/duration/distance target (creates or updates TARGET event) |
 | `update_athlete_settings` | Update profile weight, resting HR, height, date of birth |
@@ -116,8 +117,13 @@ There is no `RACE` or `REST_DAY` category: races are `RACE_A`, `RACE_B` or `RACE
 - **Dates:** `end_date_local` is exclusive (a one-day event ends at midnight the next day). Moving `start_date_local` moves a one-day event's end with it but leaves a multi-day event's end where it was, so `update_event` shifts it itself.
 - **Time of day:** only workouts and races keep a time in `start_date_local`; notes and days off are reset to midnight. A timed event's end is start + `moving_time` (1 h without one) and can't be set. Sending a date with `T00:00:00` makes the event all-day again, so `update_event` keeps the current time when only the date changes.
 - **Category:** workouts, races, notes and days off convert freely, but workouts and races need `type`, and only `WORKOUT` may have a `sub_type`. `TARGET`, `SEASON_START`, `SET_EFTP`, `SET_FITNESS` and `FITNESS_DAYS` events can't change category at all (`SET_FITNESS`/`FITNESS_DAYS` also rename themselves, e.g. "Fitness 42d Fatigue 7d").
-- **Structure:** a changed `description` is re-parsed into `workout_doc`, `moving_time` and `icu_training_load` (overriding a load set earlier). A workout file (`filename` + `file_contents_base64`) also works and replaces the name and description. Writing `workout_doc` directly changes the steps but not the description, duration or load, so it isn't exposed.
+- **Structure:** a changed `description` is re-parsed into `workout_doc`, `moving_time` and `icu_training_load` (overriding a load set earlier), and a changed name or description without `type` can change the type too: "yoga 20'" in a strength workout's notes made it a 20-minute Yoga workout with its load cleared (2026-10). So `update_event` sends the current type, duration and load (and their `*_target` fields) along with a new name or description, unless the call sets them, and PUTs them again on their own if the answer still has them changed. A side effect: changing a workout's steps no longer changes its planned duration or load unless the call passes `time_target`/`load_target`. A workout file (`filename` + `file_contents_base64`) also works and replaces the name and description. Writing `workout_doc` directly changes the steps but not the description, duration or load, so it isn't exposed.
 - **Attachments:** files are uploaded with `POST /api/attachment` (multipart, 20 MB), which isn't in the public API and returns 401 for the API key, so only the web app can add them. `PUT` accepts `attachments` only as full objects from that upload (`id`, `filename`, `mimetype`, `url`); `update_event` can therefore only remove them, by sending the rest.
+
+### Activity intervals and streams
+`GET /athlete/{id}/activities/{ids}` leaves out `icu_intervals` and `icu_groups` unless asked with `intervals=true` (until 2026-10 `get_activity` didn't, though its description promised intervals). Each interval has `start_index`/`end_index` (positions in the streams), `start_time`/`end_time` (seconds from the start, elapsed time, like the `time` stream), `elapsed_time`, `moving_time`, `distance` (m covered), averages, `joules_above_ftp`, `wbal_start`/`wbal_end`, but no coordinates: those are in the `latlng` stream at the interval's indexes. About half of the ~80 fields are null. The cache key is `activity:{id}:intervals`, so SQLite entries from before (`activity:{id}`, never expiring) aren't served without intervals.
+
+Streams come back as `[{type, data, data2?}]`; `latlng` has latitudes in `data` and longitudes in `data2`. The `time` stream has gaps where recording paused (auto-pause, café stops: `elapsed_time` vs `icu_recording_time`). `analyze_activity_window` treats a gap of more than 5 s as a stop: no riding (left out of averages and NP) and 0 W for W′ balance, so W′ recovers during it.
 
 ### API field name mismatches for events
 The intervals.icu UI reads different fields than what the API names suggest for planned workout targets:
@@ -168,6 +174,7 @@ intervals-icu-mcp/
 │       ├── accounts.ts    # Registers each tool for own account + as coach_<name>; owner checks for IDs
 │       ├── athletes.ts    # coach_list_athletes
 │       ├── activities.ts  # get_activities, get_activity, get_activity_streams
+│       ├── analysis.ts    # analyze_activity_window (stats and W′ balance for sections of a ride)
 │       ├── fitness.ts     # get_fitness, get_events
 │       ├── power-curve.ts # get_power_curve
 │       ├── wellness.ts    # get_wellness
@@ -176,7 +183,7 @@ intervals-icu-mcp/
 │       ├── upload.ts      # create_event, update_event, delete_event, delete_activity,
 │       │                  # upload_activity, set_weekly_target
 │       └── coaching.ts    # get_coaching_context (aggregated coaching snapshot)
-├── test/                  # node:test tests, run against dist/ (npm test)
+├── test/                  # node:test tests, run against dist/ (npm test); helpers.mjs fakes intervals.icu
 ├── dist/                  # Compiled JS (gitignored)
 ├── dist-lambda/           # Lambda bundle (gitignored)
 └── cache.db               # SQLite database (gitignored)
@@ -196,7 +203,7 @@ CREATE TABLE cache (
 
 Use `clear_cache` tool to flush when data seems stale.
 
-Write tools invalidate what they make stale: event writes drop every `events:` and `fitness:` key (SET_FITNESS, SET_EFTP and FITNESS_DAYS events change the fitness numbers), activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
+Write tools invalidate what they make stale: event writes drop every `events:` and `fitness:` key (SET_FITNESS, SET_EFTP and FITNESS_DAYS events change the fitness numbers), activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:{id}:intervals`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
 
 Coached athletes' data is in the same cache under `coached:{athleteId}:` + the usual key (`PrefixedCache`), so a coach_ write only invalidates that athlete's entries. The athlete list itself is `coached_athletes`.
 
@@ -231,8 +238,8 @@ Docs: https://intervals.icu/api-docs.html
 Key endpoints used:
 - `GET /api/v1/athlete/{id}` — athlete profile plus `sportSettings`; `scripts/users.mjs` uses it to validate credentials
 - `PUT /api/v1/athlete/{id}` — update profile fields (`icu_weight`, `icu_resting_hr`, `height`, `icu_date_of_birth`)
-- `GET /api/v1/athlete/{id}/activities` — list activities
-- `GET /api/v1/athlete/{id}/activities/{activityId}` — activity detail (takes a comma-separated list of IDs, returns a list)
+- `GET /api/v1/athlete/{id}/activities` — list activities (also takes `fields`, unused: `get_activities` caches full activities and trims them itself)
+- `GET /api/v1/athlete/{id}/activities/{activityId}?intervals=true` — activity detail with intervals (takes a comma-separated list of IDs, returns a list)
 - `GET /api/v1/activity/{activityId}/streams` — streams (not under `/athlete/{id}` — activity IDs are globally unique)
 - `GET /api/v1/athlete/{id}/athlete-summary` — weekly fitness aggregates
 - `GET /api/v1/athlete/{id}/events` — calendar events

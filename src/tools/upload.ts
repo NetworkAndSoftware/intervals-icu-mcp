@@ -2,7 +2,7 @@ import { z } from "zod";
 import { readFile } from "fs/promises";
 import type { Cache } from "../cache.js";
 import { addDays, dayOfWeek, daysBetween } from "../dates.js";
-import { activityId, getActivity, getEvent, type Tools } from "./accounts.js";
+import { activityCacheKey, activityId, getActivity, getEvent, type Tools } from "./accounts.js";
 
 // Writes must drop what they make stale, or reads keep serving the old data for up to
 // the TTL (forever, for a single activity). SET_FITNESS, SET_EFTP and FITNESS_DAYS
@@ -13,7 +13,7 @@ const eventsChanged = (cache: Cache) => {
 const activitiesChanged = (cache: Cache, id?: string) => {
   for (const prefix of ["activities:", "fitness:", "power_curve:"]) cache.deletePrefix(prefix);
   if (id) {
-    cache.delete(`activity:${id}`);
+    cache.delete(activityCacheKey(id));
     cache.deletePrefix(`streams:${id}:`);
   }
 };
@@ -28,7 +28,7 @@ const CATEGORIES = [
 // Updates are partial: fields left out keep their value, "" clears a text field, [] clears tags.
 const eventFields = {
   name: z.string().optional().describe("Event name"),
-  description: z.string().optional().describe("Notes. For a WORKOUT this is also the workout itself, in intervals.icu's workout text: one step per line ('- 15m 55%', '- 5m 95-105% 90rpm'), with 'Nx' on its own line before steps to repeat them. intervals.icu rebuilds the structure, duration and load from it; other lines stay as notes"),
+  description: z.string().optional().describe("Notes. For a WORKOUT this is also the workout itself, in intervals.icu's workout text: one step per line ('- 15m 55%', '- 5m 95-105% 90rpm'), with 'Nx' on its own line before steps to repeat them. intervals.icu rebuilds the steps from it, and on create the duration and load; other lines stay as notes"),
   type: z.string().optional().describe('Activity type, e.g. "Ride", "VirtualRide", "Run", "Rowing". Required for workouts, races and SET_EFTP'),
   start_time: z.string().regex(/^(([01]\d|2[0-3]):[0-5]\d)?$/).optional().describe('Local start time, HH:MM (e.g. "07:30"), or "" for all day. Only workouts and races keep a time'),
   end_date: z.string().optional().describe("Last day (inclusive) of a multi-day event such as a holiday, sick or injured period (ISO format)"),
@@ -71,6 +71,15 @@ function eventBody(fields: Record<string, unknown>): Record<string, unknown> {
   if (body.distance_target != null) body.distance = body.distance_target;
   return body;
 }
+
+// What intervals.icu re-derives from a new name or description (e.g. "yoga 20'" in a strength
+// workout's notes made it a 20-minute Yoga workout without load), by the parameter that sets it
+const DERIVED: Record<string, string[]> = {
+  type: ["type"],
+  time_target: ["time_target", "moving_time"],
+  load_target: ["load_target", "icu_training_load"],
+  distance_target: ["distance_target", "distance"],
+};
 
 // end_date_local is exclusive: a one-day event ends at midnight the next day
 const endDateLocal = (lastDay: string) => `${addDays(lastDay, 1)}T00:00:00`;
@@ -141,22 +150,38 @@ export function registerUploadTools(
 
   tools.add(
     "update_event",
-    "Update an existing event on the intervals.icu calendar (workout, race, note, target, day off, ...): move it to another date or time, change its category, structure or any other field. Only the fields you pass change; \"\" clears a text field and [] clears tags.",
+    "Update an existing event on the intervals.icu calendar (workout, race, note, target, day off, ...): move it to another date or time, change its category, structure or any other field. Only the fields you pass change, also type, duration and load when the name or description changes; \"\" clears a text field and [] clears tags.",
     {
       id: z.number().describe(`The event ID to update (numeric, from ${tools.name("get_events")})`),
+      start_date_local: z.string().regex(/^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?)?$/).optional().describe('New start, as get_events shows it: a date (keeps the time) or date and local time, e.g. "2026-10-20T07:30". Or use start_date and start_time'),
       start_date: z.string().optional().describe("Move the event to this date (ISO format). Keeps its start time and, for a multi-day event, its length"),
       category: z.enum(CATEGORIES).optional().describe("New category, e.g. RACE_B → RACE_A, or NOTE → WORKOUT (needs type). TARGET, SEASON_START, SET_EFTP, SET_FITNESS and FITNESS_DAYS events can't change category"),
       ...eventFields,
       remove_attachments: z.array(z.string()).optional().describe("IDs or filenames of attachments to remove. Attachments can only be added in the intervals.icu web app"),
     },
-    async ({ id, start_date, start_time, end_date, category, file_path, remove_attachments, ...fields }, account) => {
+    async ({ id, start_date_local, start_date, start_time, end_date, category, file_path, remove_attachments, ...fields }, account) => {
       const { client, cache } = account;
       if (file_path && !allowLocalFiles) return noLocalFiles;
-      // Also checks the event is this athlete's. Moving it and removing attachments start
-      // from what's there now.
+      if (start_date_local != null) {
+        if (start_date != null || start_time != null) return fail("Pass either start_date_local or start_date and start_time, not both");
+        const [date, time] = start_date_local.split("T");
+        start_date = date;
+        start_time = time?.slice(0, 5);
+      }
+      // Also checks the event is this athlete's. Moving it, removing attachments and keeping
+      // what a new name or description would change start from what's there now.
       const current = await getEvent(account, id);
 
-      const update = eventBody(fields);
+      // Sent back as they are, and set again below if intervals.icu re-derived them anyway
+      const keep: Record<string, unknown> = {};
+      if (fields.name != null || fields.description != null) {
+        for (const [param, keys] of Object.entries(DERIVED)) {
+          if ((fields as Record<string, unknown>)[param] != null) continue;
+          for (const k of keys) if (current[k] != null) keep[k] = current[k];
+        }
+      }
+
+      const update = { ...keep, ...eventBody(fields) };
       if (category) update.category = category;
 
       if (start_date != null || start_time != null || end_date != null || remove_attachments?.length) {
@@ -193,7 +218,9 @@ export function registerUploadTools(
       if (file_path) Object.assign(update, await readWorkoutFile(file_path));
       if (!Object.keys(update).length) return fail("Nothing to update: pass at least one field to change");
 
-      const result = await client.updateEvent(id, update);
+      let result = await client.updateEvent(id, update) as Record<string, unknown>;
+      const rederived = Object.entries(keep).filter(([k, v]) => result[k] !== v);
+      if (rederived.length) result = await client.updateEvent(id, Object.fromEntries(rederived)) as Record<string, unknown>;
       eventsChanged(cache);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }

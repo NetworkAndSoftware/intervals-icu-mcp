@@ -79,11 +79,14 @@ function checkOwner(account: Account, record: string, owner: unknown) {
   }
 }
 
+export const activityCacheKey = (id: string) => `activity:${id}:intervals`;
+
 // The activity path takes a list of IDs and answers with a list, leaving out IDs it doesn't
 // find. The delete and streams paths have no athlete in them, so an ID that finds nothing
 // here is refused rather than passed on to them.
 export async function getActivity(account: Account, id: string): Promise<Json[]> {
-  const cacheKey = `activity:${id}`;
+  // Not plain activity:{id}, which the SQLite cache may still hold without intervals, forever
+  const cacheKey = activityCacheKey(id);
   let activities = account.cache.get<Json[]>(cacheKey);
   if (!activities?.length) {
     const result = await account.client.getActivity(id);

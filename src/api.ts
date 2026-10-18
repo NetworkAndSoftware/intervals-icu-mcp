@@ -59,8 +59,9 @@ export class IntervalsClient {
     return this.request<unknown[]>("/activities", params);
   }
 
+  // Without intervals=true the answer has no icu_intervals or icu_groups
   async getActivity(id: string) {
-    return this.request<unknown>(`/activities/${id}`);
+    return this.request<unknown>(`/activities/${id}`, { intervals: "true" });
   }
 
   async getActivityStreams(id: string, types: StreamType[]) {

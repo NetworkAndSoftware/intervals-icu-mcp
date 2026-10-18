@@ -1,54 +1,9 @@
-// Runs against the build in dist/ (npm test builds it first)
-import { afterEach, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { IntervalsClient } from "../dist/api.js";
-import { MemoryCache } from "../dist/cache.js";
-import { createMcpServer } from "../dist/server.js";
+import { activityUrl, API, AUTH, call, COACHED, connect, fakeIntervals, KEY, ME, OTHER } from "./helpers.mjs";
 
-const API = "https://intervals.icu/api/v1";
-const ME = "i100";
-const COACHED = "i200";
-const OTHER = "i300";
-const KEY = "test-key";
-const AUTH = "Basic " + Buffer.from(`API_KEY:${KEY}`).toString("base64");
-
-// Stands in for intervals.icu: answers the routes a test lists ("METHOD url": JSON body) and
-// records every request. Anything else gets a 405, as intervals.icu answers a method a path
-// doesn't support. Nothing reaches the network, so no real activity is ever deleted.
-const realFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = realFetch; });
-
-function fakeIntervals(routes) {
-  const requests = [];
-  globalThis.fetch = async (url, init = {}) => {
-    const method = init.method ?? "GET";
-    requests.push({ method, url: String(url), auth: init.headers?.Authorization });
-    const body = routes[`${method} ${url}`];
-    if (body === undefined) {
-      return new Response(JSON.stringify({ status: 405, error: "Method Not Allowed" }), { status: 405, statusText: "Method Not Allowed" });
-    }
-    return Response.json(body);
-  };
-  return requests;
-}
-
-// The MCP server as Lambda runs it, with a client connected to it in memory
-async function connect() {
-  const server = createMcpServer(new IntervalsClient(ME, KEY), new MemoryCache(), { remote: true });
-  const client = new Client({ name: "test", version: "1.0.0" });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-  return client;
-}
-
-async function call(client, name, args) {
-  const result = await client.callTool({ name, arguments: args });
-  return { isError: result.isError ?? false, text: result.content[0].text };
-}
-
-const get = (athlete, id) => ({ method: "GET", url: `${API}/athlete/${athlete}/activities/${id}`, auth: AUTH });
+const get = (athlete, id) => ({ method: "GET", url: activityUrl(athlete, id), auth: AUTH });
 const del = (id) => ({ method: "DELETE", url: `${API}/activity/${id}`, auth: AUTH });
 
 test("deleteActivity sends DELETE /activity/{id} with the user's key, for a coached athlete too", async () => {
@@ -61,7 +16,7 @@ test("deleteActivity sends DELETE /activity/{id} with the user's key, for a coac
 
 test("coach_delete_activity checks the activity is the coached athlete's, then deletes it", async () => {
   const requests = fakeIntervals({
-    [`GET ${API}/athlete/${COACHED}/activities/i555`]: [{ id: "i555", icu_athlete_id: COACHED }],
+    [`GET ${API}/athlete/${COACHED}/activities/i555?intervals=true`]: [{ id: "i555", icu_athlete_id: COACHED }],
     [`DELETE ${API}/activity/i555`]: { id: "i555" },
   });
   const result = await call(await connect(), "coach_delete_activity", { athlete_id: COACHED, id: "i555" });
@@ -72,7 +27,7 @@ test("coach_delete_activity checks the activity is the coached athlete's, then d
 
 test("delete_activity deletes the user's own activity", async () => {
   const requests = fakeIntervals({
-    [`GET ${API}/athlete/${ME}/activities/i555`]: [{ id: "i555", icu_athlete_id: ME }],
+    [`GET ${API}/athlete/${ME}/activities/i555?intervals=true`]: [{ id: "i555", icu_athlete_id: ME }],
     [`DELETE ${API}/activity/i555`]: { id: "i555" },
   });
   const result = await call(await connect(), "delete_activity", { id: "i555" });
@@ -83,7 +38,7 @@ test("delete_activity deletes the user's own activity", async () => {
 // The DELETE path names no athlete, so only the owner check keeps a tool to its own account
 test("delete_activity refuses a coached athlete's activity", async () => {
   const requests = fakeIntervals({
-    [`GET ${API}/athlete/${ME}/activities/i555`]: [{ id: "i555", icu_athlete_id: COACHED }],
+    [`GET ${API}/athlete/${ME}/activities/i555?intervals=true`]: [{ id: "i555", icu_athlete_id: COACHED }],
   });
   const result = await call(await connect(), "delete_activity", { id: "i555" });
   assert.equal(result.isError, true);
@@ -93,7 +48,7 @@ test("delete_activity refuses a coached athlete's activity", async () => {
 
 test("coach_delete_activity refuses an activity of a different athlete", async () => {
   const requests = fakeIntervals({
-    [`GET ${API}/athlete/${COACHED}/activities/i555`]: [{ id: "i555", icu_athlete_id: OTHER }],
+    [`GET ${API}/athlete/${COACHED}/activities/i555?intervals=true`]: [{ id: "i555", icu_athlete_id: OTHER }],
   });
   const result = await call(await connect(), "coach_delete_activity", { athlete_id: COACHED, id: "i555" });
   assert.equal(result.isError, true);
@@ -103,7 +58,7 @@ test("coach_delete_activity refuses an activity of a different athlete", async (
 
 test("coach_delete_activity refuses an ID intervals.icu doesn't find for the athlete, without caching that", async () => {
   // intervals.icu leaves out IDs it doesn't find instead of answering 404
-  const requests = fakeIntervals({ [`GET ${API}/athlete/${COACHED}/activities/i555`]: [] });
+  const requests = fakeIntervals({ [`GET ${API}/athlete/${COACHED}/activities/i555?intervals=true`]: [] });
   const client = await connect();
   for (let i = 0; i < 2; i++) {
     const result = await call(client, "coach_delete_activity", { athlete_id: COACHED, id: "i555" });
@@ -124,7 +79,7 @@ test("coach_delete_activity refuses the user's own athlete ID", async () => {
 test("get_activity returns intervals.icu's answer as before, and a delete drops it from the cache", async () => {
   const activity = { id: "i555", icu_athlete_id: COACHED, name: "Ride" };
   const requests = fakeIntervals({
-    [`GET ${API}/athlete/${COACHED}/activities/i555`]: [activity],
+    [`GET ${API}/athlete/${COACHED}/activities/i555?intervals=true`]: [activity],
     [`DELETE ${API}/activity/i555`]: { id: "i555" },
   });
   const client = await connect();
@@ -138,7 +93,7 @@ test("get_activity returns intervals.icu's answer as before, and a delete drops 
 
 test("get_activity_streams refuses another account's activity", async () => {
   const requests = fakeIntervals({
-    [`GET ${API}/athlete/${ME}/activities/i555`]: [{ id: "i555", icu_athlete_id: COACHED }],
+    [`GET ${API}/athlete/${ME}/activities/i555?intervals=true`]: [{ id: "i555", icu_athlete_id: COACHED }],
   });
   const result = await call(await connect(), "get_activity_streams", { id: "i555", types: ["watts"] });
   assert.equal(result.isError, true);
@@ -183,10 +138,70 @@ test("tools taking an activity ID refuse anything else, before sending a request
 
 test("delete_activity takes a Strava activity's numeric ID", async () => {
   const requests = fakeIntervals({
-    [`GET ${API}/athlete/${ME}/activities/12345678901`]: [{ id: "12345678901", icu_athlete_id: ME, source: "STRAVA" }],
+    [`GET ${API}/athlete/${ME}/activities/12345678901?intervals=true`]: [{ id: "12345678901", icu_athlete_id: ME, source: "STRAVA" }],
     [`DELETE ${API}/activity/12345678901`]: { id: "12345678901" },
   });
   const result = await call(await connect(), "delete_activity", { id: "12345678901" });
   assert.equal(result.isError, false, result.text);
   assert.deepEqual(requests, [get(ME, "12345678901"), del("12345678901")]);
+});
+
+const LIST_URL = `${API}/athlete/${ME}/activities?oldest=2026-10-01&newest=2026-10-18`;
+const LIST = [
+  { id: "i1", name: "Rabbit Ride", source: "GARMIN_CONNECT", oauth_client_name: null, icu_training_load: 200, average_watts: 208 },
+  { id: "i2", name: "Zwift ride", source: "OAUTH_CLIENT", oauth_client_name: "Zwift", icu_training_load: 60, average_watts: 190 },
+  { id: "i3", name: "Rabbit Ride", source: "WAHOO", oauth_client_name: null, icu_training_load: 180, average_watts: null },
+];
+
+test("get_activities without the new arguments returns the full activities as before", async () => {
+  fakeIntervals({ [`GET ${LIST_URL}`]: LIST });
+  const result = await call(await connect(), "get_activities", { oldest: "2026-10-01", newest: "2026-10-18" });
+  assert.equal(result.isError, false, result.text);
+  assert.equal(result.text, JSON.stringify(LIST, null, 2));
+});
+
+test("get_activities with fields returns only those fields, plus id, keeping nulls", async () => {
+  fakeIntervals({ [`GET ${LIST_URL}`]: LIST });
+  const result = await call(await connect(), "get_activities", {
+    oldest: "2026-10-01", newest: "2026-10-18", fields: ["name", "average_watts", "no_such_field"],
+  });
+  assert.deepEqual(JSON.parse(result.text), [
+    { id: "i1", name: "Rabbit Ride", average_watts: 208 },
+    { id: "i2", name: "Zwift ride", average_watts: 190 },
+    { id: "i3", name: "Rabbit Ride", average_watts: null },
+  ]);
+});
+
+test("get_activities filters on source and oauth_client_name exactly, with the name query", async () => {
+  const requests = fakeIntervals({ [`GET ${LIST_URL}`]: LIST });
+  const client = await connect();
+  const args = { oldest: "2026-10-01", newest: "2026-10-18", fields: ["id"] };
+  const ids = async (more) => JSON.parse((await call(client, "get_activities", { ...args, ...more })).text).map(a => a.id);
+  assert.deepEqual(await ids({ source: "WAHOO" }), ["i3"]);
+  assert.deepEqual(await ids({ source: "wahoo" }), []);
+  assert.deepEqual(await ids({ oauth_client_name: "Zwift" }), ["i2"]);
+  assert.deepEqual(await ids({ source: "OAUTH_CLIENT", oauth_client_name: "Zwift" }), ["i2"]);
+  assert.deepEqual(await ids({ query: "rabbit", source: "GARMIN_CONNECT" }), ["i1"]);
+  // One fetch: the filters work on the cached list
+  assert.equal(requests.length, 1);
+});
+
+test("get_activity asks for intervals and returns their positions, without null fields", async () => {
+  const interval = {
+    id: 1, type: "WORK", start_index: 120, end_index: 300, start_time: 125, end_time: 305,
+    elapsed_time: 180, distance: 1450.5, average_watts: 350, wbal_start: 22500, wbal_end: 15000, average_smo2: null,
+  };
+  const group = { id: "180s@350w", count: 1, average_watts: 350, average_lactate: null };
+  const activity = { id: "i555", icu_athlete_id: ME, name: "Ride", carbs_used: null, icu_intervals: [interval], icu_groups: [group] };
+  const requests = fakeIntervals({ [`GET ${activityUrl(ME, "i555")}`]: [activity] });
+  const result = await call(await connect(), "get_activity", { id: "i555" });
+  assert.equal(result.isError, false, result.text);
+  const { average_smo2, ...withoutNull } = interval;
+  // The activity's own fields stay as they were, nulls included
+  assert.deepEqual(JSON.parse(result.text), [{
+    ...activity,
+    icu_intervals: [withoutNull],
+    icu_groups: [{ id: "180s@350w", count: 1, average_watts: 350 }],
+  }]);
+  assert.deepEqual(requests, [get(ME, "i555")]);
 });

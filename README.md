@@ -17,9 +17,10 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 ### Read
 | Tool | Description |
 |------|-------------|
-| `get_activities` | List activities with optional type filter and name search (string or regex) |
-| `get_activity` | Full detail for a single activity |
+| `get_activities` | List activities with optional type, source and app filters and name search (string or regex); `fields` returns only the fields you need |
+| `get_activity` | Full detail for a single activity, including its intervals |
 | `get_activity_streams` | Time-series data (power, HR, cadence, GPS, altitude) |
+| `analyze_activity_window` | Avg power, NP, HR, kJ above threshold and CP, and W′ balance for sections of a ride, chosen by time, distance or GPS point |
 | `get_fitness` | Weekly fitness summaries (CTL/ATL/TSB, ramp rate, zone times, by-sport breakdowns) |
 | `get_events` | Calendar events (planned workouts, races, weekly targets, notes), optionally by category |
 | `get_power_curve` | Best power for each duration over a date range |
@@ -32,7 +33,7 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | Tool | Description |
 |------|-------------|
 | `create_event` | Create a workout, race (A/B/C priority), target, note, holiday/sick/injured period, season start, or fitness-model change (eFTP, CTL/ATL, time constants) |
-| `update_event` | Move an event (date, start time, end of a multi-day event) or change its category, workout structure, indoor/outdoor, race entered, tags and other fields; remove attachments |
+| `update_event` | Move an event (date, start time, end of a multi-day event) or change its category, workout structure, indoor/outdoor, race entered, tags and other fields; remove attachments. Fields you don't pass keep their values |
 | `delete_event` | Delete an event by ID |
 | `set_weekly_target` | Set/update weekly load, duration, or distance target |
 | `update_athlete_settings` | Update weight, resting HR, height, or date of birth |
@@ -186,7 +187,7 @@ Use the `clear_cache` tool to force fresh data. On Lambda it only clears the ins
 ## Known limitations
 
 - **Strava-sourced activities** return no data via the intervals.icu API (Strava licensing restriction). Activities synced from Garmin, Wahoo, or uploaded directly work fine.
-- **No field selection** on the activities API — full objects are fetched and cached.
+- **Full activities are fetched and cached**; `get_activities` trims them to `fields` afterwards.
 
 ## Tech stack
 
