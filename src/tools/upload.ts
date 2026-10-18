@@ -1,15 +1,29 @@
 import { z } from "zod";
 import { readFile } from "fs/promises";
 import type { IntervalsClient } from "../api.js";
+import type { Cache } from "../cache.js";
+import { addDays, dayOfWeek } from "../dates.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 export function registerUploadTools(
   server: McpServer,
   client: IntervalsClient,
+  cache: Cache,
   // Off when hosted remotely: there's no user disk there, and reading the host's
   // filesystem (e.g. /proc/self/environ) would leak its credentials
   { allowLocalFiles = true }: { allowLocalFiles?: boolean } = {}
 ) {
+  // Writes must drop what they make stale, or reads keep serving the old data for up to
+  // the TTL (forever, for a single activity)
+  const eventsChanged = () => cache.deletePrefix("events:");
+  const activitiesChanged = (id?: string) => {
+    for (const prefix of ["activities:", "fitness:", "power_curve:"]) cache.deletePrefix(prefix);
+    if (id) {
+      cache.delete(`activity:${id}`);
+      cache.deletePrefix(`streams:${id}:`);
+    }
+  };
+
   if (allowLocalFiles) server.tool(
     "upload_activity",
     "Upload a completed activity file (.fit, .gpx, .tcx, .fit.gz) to intervals.icu.",
@@ -22,6 +36,7 @@ export function registerUploadTools(
       const fileBuffer = await readFile(file_path);
       const filename = file_path.replace(/\\/g, "/").split("/").pop() || "activity.fit";
       const result = await client.uploadActivity(fileBuffer, filename, name, description);
+      activitiesChanged();
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
@@ -80,6 +95,7 @@ export function registerUploadTools(
       }
 
       const result = await client.createEvent(event);
+      eventsChanged();
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
@@ -113,6 +129,7 @@ export function registerUploadTools(
         update.distance = update.distance_target;
       }
       const result = await client.updateEvent(id, update);
+      eventsChanged();
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
@@ -129,10 +146,12 @@ export function registerUploadTools(
       description: z.string().optional().describe("Optional note for the week"),
     },
     async ({ week_start, type, load_target, time_target, distance_target, description }) => {
+      if (dayOfWeek(week_start) !== 1) {
+        return { content: [{ type: "text", text: `${week_start} is not a Monday` }], isError: true };
+      }
+
       // Check if a TARGET event already exists for this week and type
-      const weekEnd = new Date(week_start);
-      weekEnd.setDate(weekEnd.getDate() + 7);
-      const endStr = weekEnd.toISOString().slice(0, 10);
+      const endStr = addDays(week_start, 7);
       const events = await client.getEvents(week_start, endStr) as Array<Record<string, unknown>>;
       const existing = events.find(
         e => e.category === "TARGET" && e.type === type && (e.start_date_local as string).startsWith(week_start)
@@ -145,6 +164,7 @@ export function registerUploadTools(
         if (distance_target != null) update.distance_target = distance_target;
         if (description) update.description = description;
         const result = await client.updateEvent(existing.id as number, update);
+        eventsChanged();
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       } else {
         const event: Record<string, unknown> = {
@@ -158,6 +178,7 @@ export function registerUploadTools(
         if (distance_target != null) event.distance_target = distance_target;
         if (description) event.description = description;
         const result = await client.createEvent(event);
+        eventsChanged();
         return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
       }
     }
@@ -171,6 +192,7 @@ export function registerUploadTools(
     },
     async ({ id }) => {
       const result = await client.deleteActivity(id);
+      activitiesChanged(id);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
@@ -183,6 +205,7 @@ export function registerUploadTools(
     },
     async ({ id }) => {
       const result = await client.deleteEvent(id);
+      eventsChanged();
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );

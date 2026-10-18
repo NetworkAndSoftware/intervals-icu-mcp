@@ -53,6 +53,11 @@ export class SqliteCache implements Cache {
     this.db.prepare("DELETE FROM cache WHERE key = ?").run(key);
   }
 
+  deletePrefix(prefix: string): void {
+    // Not LIKE: "_" and "%" in a prefix would be wildcards
+    this.db.prepare("DELETE FROM cache WHERE substr(key, 1, length(?)) = ?").run(prefix, prefix);
+  }
+
   clear(): void {
     this.db.exec("DELETE FROM cache");
   }

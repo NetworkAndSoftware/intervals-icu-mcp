@@ -20,7 +20,7 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | `get_activity` | Full detail for a single activity |
 | `get_activity_streams` | Time-series data (power, HR, cadence, GPS, altitude) |
 | `get_fitness` | Weekly fitness summaries (CTL/ATL/TSB, ramp rate, zone times, by-sport breakdowns) |
-| `get_events` | Calendar events (planned workouts, weekly targets, notes) |
+| `get_events` | Calendar events (planned workouts, races, weekly targets, notes), optionally by category |
 | `get_power_curve` | Best power for each duration over a date range |
 | `get_wellness` | Daily wellness (weight, resting HR, HRV, sleep, mood, etc.) |
 | `get_athlete_zones` | Power and HR zone definitions |

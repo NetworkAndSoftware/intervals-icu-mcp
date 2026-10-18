@@ -2,26 +2,13 @@ import { z } from "zod";
 import type { IntervalsClient } from "../api.js";
 import { Cache, TTL } from "../cache.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { addDays, dayOfWeek, getMonday } from "../dates.js";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function r1(n: number | null | undefined): number | undefined {
   if (n == null) return undefined;
   return Math.round(n * 10) / 10;
-}
-
-function getMonday(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
-
-function addDays(dateStr: string, days: number): string {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
 }
 
 function stripNulls(obj: Record<string, unknown>): Record<string, unknown> {
@@ -137,12 +124,12 @@ export function registerCoachingTools(
     "get_coaching_context",
     "Get a compact coaching context snapshot including current fitness/fatigue, this week's planned vs actual training, daily wellness trends, and activity summaries. Designed for LLM coaching conversations. Returns one week by default; use weeks_back for trend analysis. Use season_start for full-season weekly progression including zone distribution.",
     {
-      date: z.string().optional().describe("Reference date (ISO format, e.g. 2026-03-18). Defaults to today."),
+      date: z.string().optional().describe("Reference date (ISO format, e.g. 2026-03-18). Defaults to today in the athlete's time zone."),
       weeks_back: z.number().int().min(0).max(4).optional().describe("Number of prior completed weeks to include in detailed view (0-4). Default 0 = current week only."),
       season_start: z.string().optional().describe("Start date for season summary (ISO format, e.g. 2026-01-05). When provided, includes a 'season' array with compact weekly summaries showing CTL/ATL/TSB progression, load by sport, and zone distribution. Use a Monday for clean alignment."),
     },
     async ({ date, weeks_back, season_start }) => {
-      const refDate = date || new Date().toISOString().slice(0, 10);
+      const refDate = date || await client.today();
       const weeksBack = weeks_back || 0;
 
       const currentMonday = getMonday(refDate);
@@ -279,9 +266,9 @@ export function registerCoachingTools(
         const days: Record<string, unknown>[] = [];
         for (let d = 0; d < 7; d++) {
           const dayDate = addDays(weekMonday, d);
-          const dayOfWeek = DAY_NAMES[new Date(dayDate + "T00:00:00").getDay()];
+          const dayName = DAY_NAMES[dayOfWeek(dayDate)];
 
-          const dayObj: Record<string, unknown> = { date: dayDate, day: dayOfWeek };
+          const dayObj: Record<string, unknown> = { date: dayDate, day: dayName };
 
           const wl = wellnessByDate.get(dayDate);
           if (wl) {

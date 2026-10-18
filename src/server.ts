@@ -26,7 +26,7 @@ export function createMcpServer(
   registerWellnessTools(server, client, cache);
   registerZonesTools(server, client, cache);
   registerSettingsTools(server, client, cache);
-  registerUploadTools(server, client, { allowLocalFiles: !remote });
+  registerUploadTools(server, client, cache, { allowLocalFiles: !remote });
   registerCoachingTools(server, client, cache);
 
   server.tool(

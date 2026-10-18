@@ -1,10 +1,12 @@
 import type { StreamType } from "./types.js";
+import { todayIn } from "./dates.js";
 
 const BASE_URL = "https://intervals.icu/api/v1";
 
 export class IntervalsClient {
   readonly athleteId: string;
   private authHeader: string;
+  private timeZone?: Promise<string | undefined>;
 
   constructor(athleteId: string, apiKey: string) {
     this.athleteId = athleteId;
@@ -84,6 +86,17 @@ export class IntervalsClient {
 
   async getAthlete() {
     return this.request<unknown>("");
+  }
+
+  // The athlete's local date. Calendar and wellness entries are keyed by it, and the
+  // server's clock can be a day ahead: Lambda runs in UTC, and UTC is past midnight
+  // from late afternoon in the Americas.
+  async today(): Promise<string> {
+    this.timeZone ??= this.getAthlete().then(
+      a => (a as { timezone?: string }).timezone,
+      () => { this.timeZone = undefined; return undefined; }
+    );
+    return todayIn(await this.timeZone);
   }
 
   async getSportSettings() {

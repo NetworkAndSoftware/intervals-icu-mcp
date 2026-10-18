@@ -2,6 +2,7 @@ export interface Cache {
   get<T>(key: string): T | null;
   set(key: string, value: unknown, ttl: number): void;
   delete(key: string): void;
+  deletePrefix(prefix: string): void;
   clear(): void;
 }
 
@@ -44,6 +45,12 @@ export class MemoryCache implements Cache {
 
   delete(key: string): void {
     this.entries.delete(key);
+  }
+
+  deletePrefix(prefix: string): void {
+    for (const key of [...this.entries.keys()]) {
+      if (key.startsWith(prefix)) this.entries.delete(key);
+    }
   }
 
   clear(): void {

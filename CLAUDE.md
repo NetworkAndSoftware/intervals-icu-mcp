@@ -43,7 +43,7 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | `get_activity` | Full detail for a single activity | Never expires |
 | `get_activity_streams` | Time-series data (watts, HR, cadence, etc.) | Never expires |
 | `get_fitness` | Weekly fitness summaries (CTL/ATL/TSB, ramp rate, zone times, by-category breakdowns) | 4 hours |
-| `get_events` | Calendar events (planned workouts, targets, notes) | 1 hour |
+| `get_events` | Calendar events (planned workouts, races, targets, notes). Optional `category` filter; drops nulls, and `workout_doc` unless `include_workout_doc` | 1 hour |
 | `get_power_curve` | Best power for each duration over a date range | 4 hours |
 | `get_wellness` | Daily wellness (weight, resting HR, HRV, sleep, mood, etc.) | 1 hour (today), never (past) |
 | `get_athlete_zones` | Power and HR zone definitions | 24 hours |
@@ -136,6 +136,7 @@ intervals-icu-mcp/
 │   ├── api.ts             # intervals.icu API client (all HTTP methods)
 │   ├── cache.ts           # Cache interface, TTLs, in-memory cache (Lambda / --http)
 │   ├── sqlite-cache.ts    # SQLite cache (stdio)
+│   ├── dates.ts           # YYYY-MM-DD helpers (addDays, getMonday, todayIn)
 │   ├── types.ts           # TypeScript interfaces (StreamType)
 │   └── tools/
 │       ├── activities.ts  # get_activities, get_activity, get_activity_streams
@@ -165,6 +166,11 @@ CREATE TABLE cache (
 ```
 
 Use `clear_cache` tool to flush when data seems stale.
+
+Write tools invalidate what they make stale: event writes drop every `events:` key, activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
+
+### Dates and time zones
+"Today" is the athlete's local date (`client.today()`, from the profile's `timezone`, fetched once per client), never `new Date().toISOString()`: that's UTC, which is already tomorrow from late afternoon in the Americas, so Sunday-evening coaching context showed next week and today's wellness got the never-expires TTL for past days. Date arithmetic lives in `src/dates.ts` and works on `YYYY-MM-DD` strings in UTC, so it doesn't depend on the server's own time zone.
 
 On Lambda (and `--http`) the cache is `MemoryCache` instead: one per athlete (cache keys don't include the athlete ID, so a shared cache would leak data between users), per instance, lost on cold start, capped at 500 entries. `better-sqlite3` is a native module built for Windows here, and Lambda's disk is ephemeral anyway.
 

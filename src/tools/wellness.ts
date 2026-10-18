@@ -16,7 +16,7 @@ export function registerWellnessTools(
       newest: z.string().describe("End date (ISO format, e.g. 2024-03-01)"),
     },
     async ({ oldest, newest }) => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = await client.today();
       const includesToday = newest >= today;
       const ttl = includesToday ? TTL.ONE_HOUR : TTL.NEVER;
 
