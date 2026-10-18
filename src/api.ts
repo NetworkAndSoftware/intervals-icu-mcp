@@ -76,6 +76,10 @@ export class IntervalsClient {
     return this.request<unknown[]>("/events", { oldest, newest });
   }
 
+  async getEvent(id: number) {
+    return this.request<unknown>(`/events/${id}`);
+  }
+
   async getPowerCurve(oldest: string, newest: string) {
     return this.request<unknown>("/activity-power-curves", { oldest, newest });
   }
