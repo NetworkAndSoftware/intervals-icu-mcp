@@ -74,15 +74,20 @@ function checkOwner(account: Account, record: string, owner: unknown) {
   }
 }
 
-export async function getActivity(account: Account, id: string): Promise<Json> {
+// The activity path takes a list of IDs and answers with a list, leaving out IDs it doesn't
+// find. The delete and streams paths have no athlete in them, so an ID that finds nothing
+// here is refused rather than passed on to them.
+export async function getActivity(account: Account, id: string): Promise<Json[]> {
   const cacheKey = `activity:${id}`;
-  let activity = account.cache.get<Json>(cacheKey);
-  if (!activity) {
-    activity = await account.client.getActivity(id) as Json;
-    account.cache.set(cacheKey, activity, TTL.NEVER);
+  let activities = account.cache.get<Json[]>(cacheKey);
+  if (!activities?.length) {
+    const result = await account.client.getActivity(id);
+    activities = Array.isArray(result) ? result as Json[] : [];
+    if (!activities.length) throw new Error(`Activity ${id} not found in ${account.client.athleteId}'s activities`);
+    account.cache.set(cacheKey, activities, TTL.NEVER);
   }
-  checkOwner(account, `Activity ${id}`, activity.icu_athlete_id);
-  return activity;
+  for (const activity of activities) checkOwner(account, `Activity ${id}`, activity.icu_athlete_id);
+  return activities;
 }
 
 export async function getEvent(account: Account, id: number): Promise<Json> {

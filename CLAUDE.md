@@ -80,7 +80,7 @@ Every tool above except `clear_cache` also exists as `coach_<name>` (e.g. `coach
 ## Known Issues & Gotchas
 
 ### API paths can move without notice (2026-07 and 2026-08 breakage)
-The `/api/v1/athlete/{id}/activities/{activityId}/streams` and `/api/v1/athlete/{id}/power-curve` endpoints from the original docs both started 404ing — intervals.icu moved them to `/api/v1/activity/{activityId}/streams` (no `/athlete/{id}` prefix, activity IDs are global) and `/api/v1/athlete/{id}/activity-power-curves`. `/api/v1/athlete/{id}/zones` also started 404ing and has no direct replacement — zone data now lives on `/api/v1/athlete/{id}/sport-settings`, which returns one entry per activity type (Ride, Run, Rowing, etc.) with `power_zones`, `power_zone_names`, `hr_zones`, `hr_zone_names`, `ftp`, `lthr`, and a lot of other per-sport config alongside the zone fields. If a tool suddenly 404s on every input, don't assume the service is down — fetch the live OpenAPI spec at `https://intervals.icu/api/v1/docs` (JSON) and grep it for the resource name; the static docs page at api-docs.html is a JS app WebFetch can't render, but the spec JSON behind it is authoritative and current.
+The `/api/v1/athlete/{id}/activities/{activityId}/streams` and `/api/v1/athlete/{id}/power-curve` endpoints from the original docs both started 404ing — intervals.icu moved them to `/api/v1/activity/{activityId}/streams` (no `/athlete/{id}` prefix, activity IDs are global) and `/api/v1/athlete/{id}/activity-power-curves`. `/api/v1/athlete/{id}/zones` also started 404ing and has no direct replacement — zone data now lives on `/api/v1/athlete/{id}/sport-settings`, which returns one entry per activity type (Ride, Run, Rowing, etc.) with `power_zones`, `power_zone_names`, `hr_zones`, `hr_zone_names`, `ftp`, `lthr`, and a lot of other per-sport config alongside the zone fields. If a tool suddenly 404s on every input, don't assume the service is down — fetch the live OpenAPI spec at `https://intervals.icu/api/v1/docs` (JSON) and grep it for the resource name; the static docs page at api-docs.html is a JS app WebFetch can't render, but the spec JSON behind it is authoritative and current. Deleting an activity isn't under `/athlete/{id}` either: there the activity path is GET-only and answers DELETE with 405 (found 2026-10); it's `DELETE /api/v1/activity/{activityId}`.
 
 ### Sport settings: updating by type name can hit the wrong entry
 `PUT /sport-settings/{id}` accepts an activity type instead of the numeric ID, but a type no entry lists (e.g. `Kitesurf`) silently updates the **Other** entry instead of failing. `update_sport_settings` therefore lists the entries, matches the type itself, and PUTs by numeric ID. Other behaviour, verified 2026-10 against a throwaway entry:
@@ -97,7 +97,7 @@ A coach's own API key reaches the accounts of the athletes who accepted them as 
 
 - **Why separate tools:** Claude keeps permission settings per tool (Claude Code allowlists, claude.ai's per-tool "always allow"), so the user approves changes to an athlete's account separately from their own. `src/tools/accounts.ts` registers each tool twice, through `ownTools` and `coachTools`; tool modules call `tools.add(...)` and get the account as the handler's second argument. Descriptions that mention another tool use `tools.name("get_events")` so the coach version points to `coach_get_events`.
 - **`athlete_id`:** must match `/^i?[1-9]\d*$/` (no `0`, which intervals.icu reads as "the key's own athlete", and no path tricks), and must not be the user's own ID.
-- **IDs from another account:** activity streams (`/activity/{id}/streams`) have no athlete in the path, and intervals.icu may not check that an activity or event ID belongs to the athlete in `/athlete/{id}/...` either. Without a check, `delete_event` given a coached athlete's event ID could change their account under the own-account tool's permission. So tools taking an activity or event ID first fetch it and compare its owner (`icu_athlete_id` on activities, `athlete_id` on events) with the account the tool acts on (`getActivity`/`getEvent` in `accounts.ts`). Records without the field are let through.
+- **IDs from another account:** activity streams and deletes (`/activity/{id}/streams`, `DELETE /activity/{id}`) have no athlete in the path, and intervals.icu may not check that an activity or event ID belongs to the athlete in `/athlete/{id}/...` either. Without a check, `delete_event` given a coached athlete's event ID could change their account under the own-account tool's permission. So tools taking an activity or event ID first fetch it and compare its owner (`icu_athlete_id` on activities, `athlete_id` on events) with the account the tool acts on (`getActivity`/`getEvent` in `accounts.ts`). Records without the field are let through. `GET /athlete/{id}/activities/{ids}` answers with a list and leaves out IDs it doesn't find (no 404), so `getActivity` checks every record in it and refuses an empty one.
 - **Coached athletes' clients:** `client.forAthlete(id)` reuses the key, one client per athlete so their own time zone is fetched once ("today" is the coached athlete's date). Never use another server user's key for a coached athlete: the signed-in user's key is what intervals.icu authorizes.
 - **Listing:** `coach_list_athletes` reads the user's own athlete-summary (below) and lists every other athlete in it. intervals.icu doesn't say there which of those the user coaches and which they only follow.
 
@@ -175,6 +175,7 @@ intervals-icu-mcp/
 │       ├── upload.ts      # create_event, update_event, delete_event, delete_activity,
 │       │                  # upload_activity, set_weekly_target
 │       └── coaching.ts    # get_coaching_context (aggregated coaching snapshot)
+├── test/                  # node:test tests, run against dist/ (npm test)
 ├── dist/                  # Compiled JS (gitignored)
 ├── dist-lambda/           # Lambda bundle (gitignored)
 └── cache.db               # SQLite database (gitignored)
@@ -230,7 +231,7 @@ Key endpoints used:
 - `GET /api/v1/athlete/{id}` — athlete profile plus `sportSettings`; `scripts/users.mjs` uses it to validate credentials
 - `PUT /api/v1/athlete/{id}` — update profile fields (`icu_weight`, `icu_resting_hr`, `height`, `icu_date_of_birth`)
 - `GET /api/v1/athlete/{id}/activities` — list activities
-- `GET /api/v1/athlete/{id}/activities/{activityId}` — activity detail
+- `GET /api/v1/athlete/{id}/activities/{activityId}` — activity detail (takes a comma-separated list of IDs, returns a list)
 - `GET /api/v1/activity/{activityId}/streams` — streams (not under `/athlete/{id}` — activity IDs are globally unique)
 - `GET /api/v1/athlete/{id}/athlete-summary` — weekly fitness aggregates
 - `GET /api/v1/athlete/{id}/events` — calendar events
@@ -243,7 +244,7 @@ Key endpoints used:
 - `GET /api/v1/athlete/{id}/events/{eventId}` — one event (owner check before update/delete; `update_event` also uses it to move events and remove attachments)
 - `PUT /api/v1/athlete/{id}/events/{eventId}` — update event (partial, see Known Issues)
 - `DELETE /api/v1/athlete/{id}/events/{eventId}` — delete event
-- `DELETE /api/v1/athlete/{id}/activities/{activityId}` — delete activity
+- `DELETE /api/v1/activity/{activityId}` — delete activity (not under `/athlete/{id}`, which answers DELETE with 405)
 
 ## Remote Hosting (AWS Lambda)
 
@@ -263,7 +264,7 @@ Setup and day-to-day commands are in README.md. Design notes and gotchas:
 
 ## Development Notes
 
-- Build with `npx tsc`. No test framework yet.
+- Build with `npx tsc`. `npm test` builds and runs `test/*.test.mjs` with Node's built-in test runner against `dist/`; `fetch` is stubbed, so nothing reaches intervals.icu.
 - Lambda: `npm run deploy` (= `build:lambda` + `sam deploy`); users and secrets via `npm run users`.
 - The server is a long-lived process, not spawned per tool call: Claude Desktop starts it at launch and keeps it running until Desktop quits (observed running 28+ hours). It holds `cache.db` open in WAL mode the whole time, so `cache.db-wal`/`cache.db-shm` are live, locked files while Desktop is running.
 - Keep the repo out of cloud-synced folders (Proton Drive, OneDrive, etc.). It lived in Proton Drive until 2026-09, where sync repeatedly name-clashed the live `cache.db-wal` and silently dropped the `[core]` section from `.git/config`.

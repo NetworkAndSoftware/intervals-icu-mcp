@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --http",
     "dev": "tsc --watch",
+    "test": "tsc && node --test",
     "build:lambda": "node scripts/build-lambda.mjs",
     "users": "node scripts/users.mjs",
     "deploy": "npm run build:lambda && sam deploy"

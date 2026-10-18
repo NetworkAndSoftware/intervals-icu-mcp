@@ -193,8 +193,9 @@ export class IntervalsClient {
     return (await res.json()) as unknown;
   }
 
+  // Not under /athlete/{id} like the GET (activity IDs are global): there, DELETE gets a 405
   async deleteActivity(id: string) {
-    const url = new URL(`${BASE_URL}/athlete/${this.athleteId}/activities/${id}`);
+    const url = new URL(`${BASE_URL}/activity/${id}`);
     const res = await fetch(url.toString(), {
       method: "DELETE",
       headers: { Authorization: this.authHeader },
