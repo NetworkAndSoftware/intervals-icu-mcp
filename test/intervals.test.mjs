@@ -14,18 +14,21 @@ const answer = (existing = []) => (sent) => ({
 
 const puts = (requests) => requests.filter(r => r.method === "PUT");
 
-test("get_activity_intervals returns the main fields of each interval, from the same fetch as get_activity", async () => {
+test("get_activity_intervals returns the main fields of each interval, rounded, from the same fetch as get_activity", async () => {
   const kept = {
     id: 7, type: "WORK", label: "Colony", start_index: 120, end_index: 300, start_time: 125, end_time: 305,
-    distance: 1450.5, average_watts: 350, weighted_average_watts: 352, joules_above_ftp: 4500, wbal_start: 22500, wbal_end: 15000,
+    average_watts: 350, weighted_average_watts: 352, joules_above_ftp: 4500, wbal_start: 22500, wbal_end: 15000,
   };
+  // As intervals.icu sends them, and as the tool returns them
+  const decimals = { distance: 1450.63086, average_cadence: 86.320984, training_load: 2.644423, average_gradient: 0.075291686 };
+  const roundedDecimals = { distance: 1451, average_cadence: 86, training_load: 2.6, average_gradient: 0.075 };
   const requests = fakeIntervals({
-    [`GET ${activityUrl(ME, "i555")}`]: [{ ...ACTIVITY, icu_intervals: [{ ...kept, average_smo2: null, max_torque: 60 }] }],
+    [`GET ${activityUrl(ME, "i555")}`]: [{ ...ACTIVITY, icu_intervals: [{ ...kept, ...decimals, average_smo2: null, max_torque: 60.5 }] }],
   });
   const client = await connect();
   const result = await call(client, "get_activity_intervals", { id: "i555" });
   assert.equal(result.isError, false, result.text);
-  assert.equal(result.text, JSON.stringify([kept]));
+  assert.deepEqual(JSON.parse(result.text), [{ ...kept, ...roundedDecimals }]);
   await call(client, "get_activity", { id: "i555" });
   assert.equal(requests.length, 1);
 });

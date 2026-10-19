@@ -11,8 +11,15 @@ const INTERVAL_FIELDS = [
   "average_cadence", "joules_above_ftp", "wbal_start", "wbal_end", "training_load", "zone", "average_gradient",
 ];
 
+// Decimals kept of the fields that aren't whole numbers: intervals.icu sends up to ten
+// (gradient -0.006331372, a fraction; cadence 80.32361)
+const DECIMALS: Record<string, number> = { distance: 0, average_cadence: 0, training_load: 1, average_gradient: 3 };
+
+const rounded = (k: string, v: unknown) =>
+  typeof v === "number" && k in DECIMALS ? Math.round(v * 10 ** DECIMALS[k]) / 10 ** DECIMALS[k] : v;
+
 const pickInterval = (interval: Json) =>
-  Object.fromEntries(INTERVAL_FIELDS.filter(k => interval[k] != null).map(k => [k, interval[k]]));
+  Object.fromEntries(INTERVAL_FIELDS.filter(k => interval[k] != null).map(k => [k, rounded(k, interval[k])]));
 
 const intervalSchema = windowSchema.extend({
   label: z.string().optional().describe("The interval's label"),
