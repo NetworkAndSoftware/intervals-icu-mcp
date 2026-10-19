@@ -14,21 +14,23 @@ const answer = (existing = []) => (sent) => ({
 
 const puts = (requests) => requests.filter(r => r.method === "PUT");
 
-test("get_activity_intervals returns the main fields of each interval, rounded, from the same fetch as get_activity", async () => {
-  const kept = {
-    id: 7, type: "WORK", label: "Colony", start_index: 120, end_index: 300, start_time: 125, end_time: 305,
-    average_watts: 350, weighted_average_watts: 352, joules_above_ftp: 4500, wbal_start: 22500, wbal_end: 15000,
-  };
-  // As intervals.icu sends them, and as the tool returns them
-  const decimals = { distance: 1450.63086, average_cadence: 86.320984, training_load: 2.644423, average_gradient: 0.075291686 };
-  const roundedDecimals = { distance: 1451, average_cadence: 86, training_load: 2.6, average_gradient: 0.075 };
-  const requests = fakeIntervals({
-    [`GET ${activityUrl(ME, "i555")}`]: [{ ...ACTIVITY, icu_intervals: [{ ...kept, ...decimals, average_smo2: null, max_torque: 60.5 }] }],
-  });
+test("get_activity_intervals returns the main fields of the intervals as a table, from the same fetch as get_activity", async () => {
+  const intervals = [
+    { id: 7, type: "WORK", label: "Colony", start_index: 120, end_index: 300, start_time: 125, end_time: 305, distance: 1450.63086, average_watts: 350, average_gradient: 0.075291686 },
+    // No label; fields that are null or not among those returned
+    { id: 8, type: "RECOVERY", label: null, start_index: 300, end_index: 400, start_time: 305, end_time: 405, distance: 900.5, average_watts: 180, average_gradient: -0.006331372, average_smo2: null, max_torque: 60.5 },
+  ];
+  const requests = fakeIntervals({ [`GET ${activityUrl(ME, "i555")}`]: [{ ...ACTIVITY, icu_intervals: intervals }] });
   const client = await connect();
   const result = await call(client, "get_activity_intervals", { id: "i555" });
   assert.equal(result.isError, false, result.text);
-  assert.deepEqual(JSON.parse(result.text), [{ ...kept, ...roundedDecimals }]);
+  assert.equal(result.text, JSON.stringify({
+    fields: ["id", "type", "label", "start_index", "end_index", "start_time", "end_time", "distance", "average_watts", "average_gradient"],
+    rows: [
+      [7, "WORK", "Colony", 120, 300, 125, 305, 1450.63086, 350, 0.075291686],
+      [8, "RECOVERY", null, 300, 400, 305, 405, 900.5, 180, -0.006331372],
+    ],
+  }));
   await call(client, "get_activity", { id: "i555" });
   assert.equal(requests.length, 1);
 });
@@ -56,7 +58,10 @@ test("set_activity_intervals places intervals by time, distance and place, in ri
     { start_index: 600, end_index: 900, start_time: 700, end_time: 1000, type: "RECOVERY", label: "after the stop" },
   ];
   assert.deepEqual(puts(requests), [{ method: "PUT", url: PUT_URL("i555", true), auth: AUTH, body: sent }]);
-  assert.deepEqual(JSON.parse(result.text), { intervals: sent.map((s, i) => ({ id: i + 1, ...s, average_watts: 300 })) });
+  assert.deepEqual(JSON.parse(result.text), {
+    fields: ["id", "type", "label", "start_index", "end_index", "start_time", "end_time", "average_watts"],
+    rows: sent.map((s, i) => [i + 1, s.type, s.label, s.start_index, s.end_index, s.start_time, s.end_time, 300]),
+  });
 });
 
 test("set_activity_intervals merges with replace: false", async () => {
@@ -69,7 +74,7 @@ test("set_activity_intervals merges with replace: false", async () => {
   const result = await call(await connect(), "set_activity_intervals", { id: "i555", replace: false, intervals: [{ start_s: 100, end_s: 160 }] });
   assert.equal(result.isError, false, result.text);
   assert.equal(puts(requests)[0].url, PUT_URL("i555", false));
-  assert.equal(JSON.parse(result.text).intervals.length, 2);
+  assert.equal(JSON.parse(result.text).rows.length, 2);
 });
 
 test("set_activity_intervals writes nothing when an interval can't be placed or two overlap", async () => {

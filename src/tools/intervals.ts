@@ -11,15 +11,12 @@ const INTERVAL_FIELDS = [
   "average_cadence", "joules_above_ftp", "wbal_start", "wbal_end", "training_load", "zone", "average_gradient",
 ];
 
-// Decimals kept of the fields that aren't whole numbers: intervals.icu sends up to ten
-// (gradient -0.006331372, a fraction; cadence 80.32361)
-const DECIMALS: Record<string, number> = { distance: 0, average_cadence: 0, training_load: 1, average_gradient: 3 };
-
-const rounded = (k: string, v: unknown) =>
-  typeof v === "number" && k in DECIMALS ? Math.round(v * 10 ** DECIMALS[k]) / 10 ** DECIMALS[k] : v;
-
-const pickInterval = (interval: Json) =>
-  Object.fromEntries(INTERVAL_FIELDS.filter(k => interval[k] != null).map(k => [k, rounded(k, interval[k])]));
+// A table: the field names once, then a row of values per interval. Repeated in every
+// interval, the names were 6.2 of 8.8 KB for a 3-hour ride's 21 intervals; as a table, 3.0 KB.
+function intervalTable(intervals: Json[]) {
+  const fields = INTERVAL_FIELDS.filter(k => intervals.some(i => i[k] != null));
+  return { fields, rows: intervals.map(i => fields.map(k => i[k] ?? null)) };
+}
 
 const intervalSchema = windowSchema.extend({
   label: z.string().optional().describe("The interval's label"),
@@ -29,14 +26,14 @@ const intervalSchema = windowSchema.extend({
 export function registerIntervalTools(tools: Tools) {
   tools.add(
     "get_activity_intervals",
-    "Intervals of an activity: for each, its start and end (start_time/end_time: seconds from the start; start_index/end_index: stream positions), distance, power, NP, HR, cadence, kJ above FTP, W′ balance, load and zone.",
+    "Intervals of an activity, as a table (fields, then a row per interval): start and end (start_time/end_time: seconds from the start; start_index/end_index: stream positions), distance, power, NP, HR, cadence, kJ above FTP, W′ balance, load and zone.",
     {
       id: activityId.describe("Activity ID"),
     },
     async ({ id }, account) => {
       const [activity] = await getActivity(account, id);
-      const intervals = ((activity.icu_intervals ?? []) as Json[]).map(pickInterval);
-      return { content: [{ type: "text", text: JSON.stringify(intervals) }] };
+      const table = intervalTable((activity.icu_intervals ?? []) as Json[]);
+      return { content: [{ type: "text", text: JSON.stringify(table) }] };
     }
   );
 
@@ -90,7 +87,7 @@ export function registerIntervalTools(tools: Tools) {
       const written = (result.icu_intervals ?? []) as Json[];
       const missing = sent.filter(s => !written.some(r => r.start_index === s.start_index && r.end_index === s.end_index));
       const data = {
-        intervals: written.map(pickInterval),
+        ...intervalTable(written),
         ...(missing.length && {
           warning: `intervals.icu's answer lacks ${missing.length} of the ${sent.length} intervals sent: ${JSON.stringify(missing)}`,
         }),
