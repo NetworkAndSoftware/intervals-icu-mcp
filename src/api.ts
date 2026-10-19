@@ -194,6 +194,29 @@ export class IntervalsClient {
     return (await res.json()) as unknown;
   }
 
+  // all=true (the API's default, sent anyway) replaces every existing interval; with false,
+  // intervals.icu merges the list into them. Not under /athlete/{id}, like the streams.
+  async updateIntervals(id: string, intervals: Record<string, unknown>[]) {
+    const url = new URL(`${BASE_URL}/activity/${id}/intervals`);
+    url.searchParams.set("all", "true");
+    const res = await fetch(url.toString(), {
+      method: "PUT",
+      headers: {
+        Authorization: this.authHeader,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(intervals),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new IntervalsApiError(res.status, res.statusText, text);
+    }
+
+    return (await res.json()) as unknown;
+  }
+
   // Not under /athlete/{id} like the GET (activity IDs are global): there, DELETE gets a 405
   async deleteActivity(id: string) {
     const url = new URL(`${BASE_URL}/activity/${id}`);

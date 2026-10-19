@@ -63,6 +63,7 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | `update_sport_settings` | Update one sport's FTP, indoor FTP, W′, Pmax, LTHR, max HR, threshold pace, HR/power zones |
 | `upload_activity` | Upload a completed activity file (.fit/.gpx/.tcx). Local only — not registered on Lambda |
 | `delete_activity` | Delete an activity by activity ID |
+| `set_activity_intervals` | Replace an activity's intervals with a list of `{start_time, end_time, type?, label?}` (seconds from the start; `WORK`/`RECOVERY`, default `WORK`). Replaces, never merges; refuses unsorted, overlapping or out-of-range lists before writing |
 
 ### Coaching Tools
 
@@ -123,6 +124,8 @@ There is no `RACE` or `REST_DAY` category: races are `RACE_A`, `RACE_B` or `RACE
 ### Activity intervals and streams
 `GET /athlete/{id}/activities/{ids}` leaves out `icu_intervals` and `icu_groups` unless asked with `intervals=true` (until 2026-10 `get_activity` didn't, though its description promised intervals). Each interval has `start_index`/`end_index` (positions in the streams), `start_time`/`end_time` (seconds from the start, elapsed time, like the `time` stream), `elapsed_time`, `moving_time`, `distance` (m covered), averages, `joules_above_ftp`, `wbal_start`/`wbal_end`, but no coordinates: those are in the `latlng` stream at the interval's indexes. About half of the ~80 fields are null. The cache key is `activity:{id}:intervals`, so SQLite entries from before (`activity:{id}`, never expiring) aren't served without intervals.
 
+Setting intervals (`set_activity_intervals`): `PUT /api/v1/activity/{id}/intervals` takes a list of intervals and answers with `{id, analyzed, icu_intervals, icu_groups}`. Its `all` query param defaults to true, "Any existing intervals are replaced, otherwise a merge is done" (OpenAPI spec, 2026-10); the tool sends `all=true` explicitly. Like the streams it isn't under `/athlete/{id}`, so the owner check applies. The spec doesn't say whether intervals.icu positions a new interval by `start_index`/`end_index` or by `start_time`/`end_time`. Its web app sends indexes (forum), so the tool maps the given seconds to indexes with the `time` stream (first sample at or after each time) and sends both; an interval that lies entirely in a recording pause is refused. Not yet verified against a live account as of 2026-10: intervals.icu wasn't reachable from the environment the tool was written in, so the spec was read from the `openapi.json` in the npm package `intervals-icu-api` 0.4.0 and checked against `intervals-icu-sdk` 0.3.0. Not exposed: `PUT /activity/{id}/intervals/{intervalId}` (update/create one), `PUT /activity/{id}/delete-intervals`, `PUT /activity/{id}/split-interval?splitAt=`. The activity also has `icu_intervals_edited` and `lock_intervals` flags, untested.
+
 Streams come back as `[{type, data, data2?}]`; `latlng` has latitudes in `data` and longitudes in `data2`. The `time` stream has gaps where recording paused (auto-pause, café stops: `elapsed_time` vs `icu_recording_time`). `analyze_activity_window` treats a gap of more than 5 s as a stop: no riding (left out of averages and NP) and 0 W for W′ balance, so W′ recovers during it.
 
 ### API field name mismatches for events
@@ -174,6 +177,7 @@ intervals-icu-mcp/
 │       ├── accounts.ts    # Registers each tool for own account + as coach_<name>; owner checks for IDs
 │       ├── athletes.ts    # coach_list_athletes
 │       ├── activities.ts  # get_activities, get_activity, get_activity_streams
+│       ├── intervals.ts   # set_activity_intervals (validates, maps seconds to stream indexes)
 │       ├── analysis.ts    # analyze_activity_window (stats and W′ balance for sections of a ride)
 │       ├── fitness.ts     # get_fitness, get_events
 │       ├── power-curve.ts # get_power_curve
@@ -203,7 +207,7 @@ CREATE TABLE cache (
 
 Use `clear_cache` tool to flush when data seems stale.
 
-Write tools invalidate what they make stale: event writes drop every `events:` and `fitness:` key (SET_FITNESS, SET_EFTP and FITNESS_DAYS events change the fitness numbers), activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:{id}:intervals`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
+Write tools invalidate what they make stale: event writes drop every `events:` and `fitness:` key (SET_FITNESS, SET_EFTP and FITNESS_DAYS events change the fitness numbers), activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:{id}:intervals`/`streams:` keys), interval writes drop that activity's `activity:{id}:intervals` and `activities:` (lists carry `interval_summary`), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
 
 Coached athletes' data is in the same cache under `coached:{athleteId}:` + the usual key (`PrefixedCache`), so a coach_ write only invalidates that athlete's entries. The athlete list itself is `coached_athletes`.
 
@@ -253,6 +257,7 @@ Key endpoints used:
 - `PUT /api/v1/athlete/{id}/events/{eventId}` — update event (partial, see Known Issues)
 - `DELETE /api/v1/athlete/{id}/events/{eventId}` — delete event
 - `DELETE /api/v1/activity/{activityId}` — delete activity (not under `/athlete/{id}`, which answers DELETE with 405)
+- `PUT /api/v1/activity/{activityId}/intervals?all=true` — replace an activity's intervals (`all=false` merges; see Activity intervals and streams)
 
 ## Remote Hosting (AWS Lambda)
 

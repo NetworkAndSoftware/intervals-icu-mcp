@@ -40,6 +40,7 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | `update_sport_settings` | Update a sport's FTP, W′, Pmax, LTHR, max HR, threshold pace, or zones |
 | `upload_activity` | Upload a .fit/.gpx/.tcx file (local server only) |
 | `delete_activity` | Delete an activity by ID |
+| `set_activity_intervals` | Replace an activity's intervals. Takes the activity `id` and `intervals`, a list of `{ start_time, end_time, type, label }`: `start_time` and `end_time` (required) are whole seconds from the activity's start, `type` is `WORK` (default) or `RECOVERY`, `label` is optional. The list becomes the activity's full set of intervals: the existing ones are removed, not merged. It must be sorted by `start_time`, without overlaps (an interval may start where the previous one ends), and end within the activity; otherwise nothing is written. Only the intervals change. Returns the intervals as intervals.icu now has them |
 
 ### Coaching
 If you coach athletes in intervals.icu, every tool above also comes in a `coach_` version (`coach_get_activities`, `coach_create_event`, …) that takes the athlete's ID and works on their account instead of yours:

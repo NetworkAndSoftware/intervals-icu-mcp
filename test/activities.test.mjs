@@ -122,9 +122,11 @@ test("tools taking an activity ID refuse anything else, before sending a request
     ["get_activity", {}],
     ["get_activity_streams", { types: ["watts"] }],
     ["delete_activity", {}],
+    ["set_activity_intervals", { intervals: [{ start_time: 0, end_time: 60 }] }],
     ["coach_get_activity", { athlete_id: COACHED }],
     ["coach_get_activity_streams", { athlete_id: COACHED, types: ["watts"] }],
     ["coach_delete_activity", { athlete_id: COACHED }],
+    ["coach_set_activity_intervals", { athlete_id: COACHED, intervals: [{ start_time: 0, end_time: 60 }] }],
   ];
   for (const [name, args] of tools) {
     for (const id of BAD_IDS) {

@@ -4,7 +4,7 @@ import { activityId, getActivity, type Tools } from "./accounts.js";
 
 type Json = Record<string, unknown>;
 
-const withoutNulls = (record: Json) => Object.fromEntries(Object.entries(record).filter(([, v]) => v != null));
+export const withoutNulls = (record: Json) => Object.fromEntries(Object.entries(record).filter(([, v]) => v != null));
 
 export function registerActivityTools(tools: Tools) {
   tools.add(

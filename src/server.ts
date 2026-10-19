@@ -6,6 +6,7 @@ import { registerActivityTools } from "./tools/activities.js";
 import { registerAnalysisTools } from "./tools/analysis.js";
 import { registerAthleteListTool } from "./tools/athletes.js";
 import { registerFitnessTools } from "./tools/fitness.js";
+import { registerIntervalTools } from "./tools/intervals.js";
 import { registerPowerCurveTools } from "./tools/power-curve.js";
 import { registerWellnessTools } from "./tools/wellness.js";
 import { registerZonesTools } from "./tools/zones.js";
@@ -33,6 +34,7 @@ export function createMcpServer(
   const own: Account = { client, cache };
   for (const tools of [ownTools(server, own), coachTools(server, own)]) {
     registerActivityTools(tools);
+    registerIntervalTools(tools);
     registerAnalysisTools(tools);
     registerFitnessTools(tools);
     registerPowerCurveTools(tools);
