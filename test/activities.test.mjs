@@ -186,22 +186,22 @@ test("get_activities filters on source and oauth_client_name exactly, with the n
   assert.equal(requests.length, 1);
 });
 
-test("get_activity asks for intervals and returns their positions, without null fields", async () => {
-  const interval = {
-    id: 1, type: "WORK", start_index: 120, end_index: 300, start_time: 125, end_time: 305,
-    elapsed_time: 180, distance: 1450.5, average_watts: 350, wbal_start: 22500, wbal_end: 15000, average_smo2: null,
+test("get_activity asks for intervals and returns their main fields, compactly, without the groups", async () => {
+  const kept = {
+    id: 1, type: "WORK", start_index: 120, end_index: 300, start_time: 125, end_time: 305, elapsed_time: 180,
+    distance: 1450.5, average_watts: 350, weighted_average_watts: 352, joules_above_ftp: 4500, wbal_start: 22500, wbal_end: 15000,
   };
-  const group = { id: "180s@350w", count: 1, average_watts: 350, average_lactate: null };
-  const activity = { id: "i555", icu_athlete_id: ME, name: "Ride", carbs_used: null, icu_intervals: [interval], icu_groups: [group] };
-  const requests = fakeIntervals({ [`GET ${activityUrl(ME, "i555")}`]: [activity] });
+  // Null, or not among the fields get_activity returns
+  const interval = { ...kept, average_smo2: null, average_temp: 8.5, max_torque: 60, segment_effort_ids: [1, 2] };
+  const group = { id: "180s@350w", count: 1, average_watts: 350 };
+  const activity = { id: "i555", icu_athlete_id: ME, name: "Ride", carbs_used: null, interval_summary: ["1x 3m 350w"] };
+  const requests = fakeIntervals({
+    [`GET ${activityUrl(ME, "i555")}`]: [{ ...activity, icu_intervals: [interval], icu_groups: [group] }],
+  });
   const result = await call(await connect(), "get_activity", { id: "i555" });
   assert.equal(result.isError, false, result.text);
-  const { average_smo2, ...withoutNull } = interval;
   // The activity's own fields stay as they were, nulls included
-  assert.deepEqual(JSON.parse(result.text), [{
-    ...activity,
-    icu_intervals: [withoutNull],
-    icu_groups: [{ id: "180s@350w", count: 1, average_watts: 350 }],
-  }]);
+  const expected = [{ ...activity, icu_intervals: [kept] }];
+  assert.equal(result.text, JSON.stringify(expected));
   assert.deepEqual(requests, [get(ME, "i555")]);
 });

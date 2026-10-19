@@ -4,7 +4,16 @@ import { activityId, getActivity, type Tools } from "./accounts.js";
 
 type Json = Record<string, unknown>;
 
-const withoutNulls = (record: Json) => Object.fromEntries(Object.entries(record).filter(([, v]) => v != null));
+// Of an interval's ~80 fields (about half of them null), the ones get_activity returns:
+// all of them made a 3-hour ride's answer ~59 KB, ~15K tokens
+const INTERVAL_FIELDS = [
+  "id", "type", "label", "start_index", "end_index", "start_time", "end_time", "elapsed_time", "moving_time",
+  "distance", "average_watts", "max_watts", "weighted_average_watts", "average_heartrate", "max_heartrate",
+  "average_cadence", "joules_above_ftp", "wbal_start", "wbal_end", "training_load", "zone", "average_gradient",
+];
+
+const pickInterval = (interval: Json) =>
+  Object.fromEntries(INTERVAL_FIELDS.filter(k => interval[k] != null).map(k => [k, interval[k]]));
 
 export function registerActivityTools(tools: Tools) {
   tools.add(
@@ -58,15 +67,13 @@ export function registerActivityTools(tools: Tools) {
       id: activityId.describe("Activity ID"),
     },
     async ({ id }, account) => {
-      // About half of each interval's ~80 fields are null
-      const data = (await getActivity(account, id)).map(activity => {
-        const out = { ...activity };
-        for (const k of ["icu_intervals", "icu_groups"]) {
-          if (Array.isArray(out[k])) out[k] = (out[k] as Json[]).map(withoutNulls);
-        }
-        return out;
+      // interval_summary already sums up the groups of similar intervals in a few short lines
+      const data = (await getActivity(account, id)).map(({ icu_groups, ...activity }) => {
+        if (Array.isArray(activity.icu_intervals)) activity.icu_intervals = (activity.icu_intervals as Json[]).map(pickInterval);
+        return activity;
       });
-      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+      // Compact: indentation would add about a third
+      return { content: [{ type: "text", text: JSON.stringify(data) }] };
     }
   );
 
