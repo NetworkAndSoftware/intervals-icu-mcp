@@ -53,3 +53,43 @@ export async function call(client, name, args) {
 
 // GET of an activity, as the owner check and get_activity send it
 export const activityUrl = (athlete, id) => `${API}/athlete/${athlete}/activities/${id}?intervals=true`;
+
+// The streams the window and interval tools fetch
+export const STREAMS_URL = (id) => `${API}/activity/${id}/streams?types=distance%2Cheartrate%2Clatlng%2Ctime%2Cwatts`;
+
+// A made-up ride: three 3 km laps of a circle at 10 m/s, one sample a second, with a 100 s
+// stop (no samples, as with auto-pause) after the second lap.
+//   0–99 s 200 W, 100–159 s 400 W, 160–599 s 150 W, stop, 700–999 s 300 W
+// HR is 120 bpm before the stop and 150 after, with two dropouts.
+const LAP_M = 3000;
+const RADIUS_M = LAP_M / (2 * Math.PI);
+export const M_PER_DEGREE = 6_371_008.8 * Math.PI / 180;
+const CENTER = [48, -122];
+export const at = (meters) => {
+  const angle = 2 * Math.PI * meters / LAP_M;
+  return [
+    CENTER[0] + RADIUS_M * Math.sin(angle) / M_PER_DEGREE,
+    CENTER[1] + RADIUS_M * Math.cos(angle) / (M_PER_DEGREE * Math.cos(CENTER[0] * Math.PI / 180)),
+  ];
+};
+
+export function ride() {
+  const time = [], watts = [], heartrate = [], distance = [], lat = [], lng = [];
+  for (let k = 0; k < 900; k++) {
+    const t = k < 600 ? k : k + 100;
+    time.push(t);
+    watts.push(t < 100 ? 200 : t < 160 ? 400 : t < 600 ? 150 : 300);
+    heartrate.push(k === 50 || k === 650 ? null : t < 600 ? 120 : 150);
+    distance.push(10 * k);
+    const [la, ln] = at(10 * k);
+    lat.push(la);
+    lng.push(ln);
+  }
+  return [
+    { type: "time", data: time },
+    { type: "watts", data: watts },
+    { type: "heartrate", data: heartrate },
+    { type: "distance", data: distance },
+    { type: "latlng", data: lat, data2: lng },
+  ];
+}

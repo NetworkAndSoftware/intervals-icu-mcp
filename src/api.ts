@@ -83,6 +83,29 @@ export class IntervalsClient {
     return (await res.json()) as unknown;
   }
 
+  // all=true replaces the activity's intervals; otherwise intervals.icu merges these with them.
+  // Not under /athlete/{id}, like the streams: activity IDs are global
+  async updateIntervals(id: string, intervals: Record<string, unknown>[], replace: boolean) {
+    const url = new URL(`${BASE_URL}/activity/${id}/intervals`);
+    url.searchParams.set("all", String(replace));
+    const res = await fetch(url.toString(), {
+      method: "PUT",
+      headers: {
+        Authorization: this.authHeader,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(intervals),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new IntervalsApiError(res.status, res.statusText, text);
+    }
+
+    return (await res.json()) as unknown;
+  }
+
   async getFitness(start: string, end: string) {
     return this.request<unknown[]>("/athlete-summary", { start, end });
   }

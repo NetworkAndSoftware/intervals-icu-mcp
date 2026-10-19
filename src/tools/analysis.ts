@@ -12,7 +12,7 @@ const MATCH_RADIUS_M = 30;
 const MAX_SAMPLE_S = 5;
 const WBAL_MODEL = "Skiba differential (Skiba et al. 2015), from the ride start; stops count as 0 W";
 
-type Ride = {
+export type Ride = {
   n: number;
   time: number[];
   // Seconds each sample's power lasts, and seconds stopped after it
@@ -26,7 +26,7 @@ type Ride = {
 };
 
 const point = z.array(z.number()).length(2);
-const windowSchema = z.object({
+export const windowSchema = z.object({
   label: z.string().optional().describe("Name shown with the results"),
   start_s: z.number().optional().describe("Start, seconds from the ride start (elapsed, like interval start_time)"),
   end_s: z.number().optional().describe("End, seconds from the ride start"),
@@ -36,9 +36,9 @@ const windowSchema = z.object({
   end_point: point.optional().describe(`End: [lat, lng], at the next pass within ${MATCH_RADIUS_M} m after the start`),
   after_s: z.number().optional().describe("Match start_point only after this many seconds"),
 });
-type Window = z.infer<typeof windowSchema>;
+export type Window = z.infer<typeof windowSchema>;
 
-async function getRide(account: Account, id: string): Promise<Ride> {
+export async function getRide(account: Account, id: string): Promise<Ride> {
   const cacheKey = `streams:${id}:${STREAMS.join(",")}`;
   let streams = account.cache.get<Json[]>(cacheKey);
   if (!streams) {
@@ -109,7 +109,7 @@ const firstIndex = (values: number[], test: (v: number) => boolean) => {
 };
 
 // The window as samples a..b-1: sample b (or the ride's end) is where it ends
-function resolve(ride: Ride, w: Window) {
+export function resolve(ride: Ride, w: Window) {
   const forms = (...values: unknown[]) => values.filter(v => v != null).length;
   if (forms(w.start_s, w.start_m, w.start_point) !== 1) throw new Error("Give exactly one of start_s, start_m, start_point");
   if (forms(w.end_s, w.end_m, w.end_point) !== 1) throw new Error("Give exactly one of end_s, end_m, end_point");
@@ -144,6 +144,10 @@ function resolve(ride: Ride, w: Window) {
   if (b <= a) throw new Error("The window ends before it starts");
   return { a, b, startMatch, endMatch };
 }
+
+// The time of the boundary before sample k, as a window's end: sample k's own, or the ride's end
+export const boundaryTime = (ride: Ride, k: number) =>
+  k < ride.n ? ride.time[k] : ride.time[ride.n - 1] + ride.moving[ride.n - 1];
 
 // Normalized power: 30 s rolling average, 4th power mean, 4th root (null under 30 s)
 function normalizedPower(ride: Ride, a: number, b: number): number | null {
@@ -216,7 +220,7 @@ export function registerAnalysisTools(tools: Tools) {
             lowest = Math.min(lowest, ridden[k]);
           }
           const startTime = ride.time[a];
-          const endTime = b < n ? ride.time[b] : ride.time[n - 1] + moving[n - 1];
+          const endTime = boundaryTime(ride, b);
           const startDistance = ride.distance?.[a];
           const endDistance = ride.distance?.[Math.min(b, n - 1)];
           return withoutUndefined({

@@ -18,7 +18,8 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | Tool | Description |
 |------|-------------|
 | `get_activities` | List activities with optional type, source and app filters and name search (string or regex); `fields` returns only the fields you need |
-| `get_activity` | Full detail for a single activity, including its intervals |
+| `get_activity` | Full detail for a single activity |
+| `get_activity_intervals` | An activity's intervals: where each starts and ends, power, HR, kJ above FTP, W′ balance |
 | `get_activity_streams` | Time-series data (power, HR, cadence, GPS, altitude) |
 | `analyze_activity_window` | Avg power, NP, HR, kJ above threshold and CP, and W′ balance for sections of a ride, chosen by time, distance or GPS point |
 | `get_fitness` | Weekly fitness summaries (CTL/ATL/TSB, ramp rate, zone times, by-sport breakdowns) |
@@ -39,6 +40,7 @@ This server exposes your intervals.icu data as tools that Claude can call, enabl
 | `update_athlete_settings` | Update weight, resting HR, height, or date of birth |
 | `update_sport_settings` | Update a sport's FTP, W′, Pmax, LTHR, max HR, threshold pace, or zones |
 | `upload_activity` | Upload a .fit/.gpx/.tcx file (local server only) |
+| `set_activity_intervals` | Write intervals on an activity, by time, distance or GPS point, replacing or adding to the existing ones |
 | `delete_activity` | Delete an activity by ID |
 
 ### Coaching

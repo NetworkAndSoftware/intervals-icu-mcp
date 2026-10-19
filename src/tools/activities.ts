@@ -2,18 +2,9 @@ import { z } from "zod";
 import { TTL } from "../cache.js";
 import { activityId, getActivity, type Tools } from "./accounts.js";
 
-type Json = Record<string, unknown>;
-
-// Of an interval's ~80 fields (about half of them null), the ones get_activity returns:
-// all of them made a 3-hour ride's answer ~59 KB, ~15K tokens
-const INTERVAL_FIELDS = [
-  "id", "type", "label", "start_index", "end_index", "start_time", "end_time", "elapsed_time", "moving_time",
-  "distance", "average_watts", "max_watts", "weighted_average_watts", "average_heartrate", "max_heartrate",
-  "average_cadence", "joules_above_ftp", "wbal_start", "wbal_end", "training_load", "zone", "average_gradient",
-];
-
-const pickInterval = (interval: Json) =>
-  Object.fromEntries(INTERVAL_FIELDS.filter(k => interval[k] != null).map(k => [k, interval[k]]));
+// Left out of get_activity: the intervals have their own tool, and the skyline chart is an
+// encoded image. With them, and indented, a 3-hour ride's answer was ~59 KB, ~15K tokens.
+const NOT_IN_ACTIVITY = ["icu_intervals", "icu_groups", "skyline_chart_bytes"];
 
 export function registerActivityTools(tools: Tools) {
   tools.add(
@@ -62,17 +53,15 @@ export function registerActivityTools(tools: Tools) {
 
   tools.add(
     "get_activity",
-    "Get full detail for a single activity including intervals (start_time/end_time: seconds from the start; start_index/end_index: stream positions), laps, and all summary metrics.",
+    `Get full detail for a single activity: all its summary metrics. Its intervals are in ${tools.name("get_activity_intervals")}.`,
     {
       id: activityId.describe("Activity ID"),
     },
     async ({ id }, account) => {
-      // interval_summary already sums up the groups of similar intervals in a few short lines
-      const data = (await getActivity(account, id)).map(({ icu_groups, ...activity }) => {
-        if (Array.isArray(activity.icu_intervals)) activity.icu_intervals = (activity.icu_intervals as Json[]).map(pickInterval);
-        return activity;
-      });
-      // Compact: indentation would add about a third
+      // Compact and without empty fields: a third of them are null
+      const data = (await getActivity(account, id)).map(activity => Object.fromEntries(
+        Object.entries(activity).filter(([k, v]) => v != null && !NOT_IN_ACTIVITY.includes(k))
+      ));
       return { content: [{ type: "text", text: JSON.stringify(data) }] };
     }
   );

@@ -186,22 +186,17 @@ test("get_activities filters on source and oauth_client_name exactly, with the n
   assert.equal(requests.length, 1);
 });
 
-test("get_activity asks for intervals and returns their main fields, compactly, without the groups", async () => {
-  const kept = {
-    id: 1, type: "WORK", start_index: 120, end_index: 300, start_time: 125, end_time: 305, elapsed_time: 180,
-    distance: 1450.5, average_watts: 350, weighted_average_watts: 352, joules_above_ftp: 4500, wbal_start: 22500, wbal_end: 15000,
-  };
-  // Null, or not among the fields get_activity returns
-  const interval = { ...kept, average_smo2: null, average_temp: 8.5, max_torque: 60, segment_effort_ids: [1, 2] };
-  const group = { id: "180s@350w", count: 1, average_watts: 350 };
-  const activity = { id: "i555", icu_athlete_id: ME, name: "Ride", carbs_used: null, interval_summary: ["1x 3m 350w"] };
+test("get_activity returns the activity compactly, without its intervals, empty fields or chart", async () => {
+  const activity = { id: "i555", icu_athlete_id: ME, name: "Ride", icu_ftp: 321, interval_summary: ["1x 3m 350w"] };
   const requests = fakeIntervals({
-    [`GET ${activityUrl(ME, "i555")}`]: [{ ...activity, icu_intervals: [interval], icu_groups: [group] }],
+    [`GET ${activityUrl(ME, "i555")}`]: [{
+      ...activity, carbs_used: null, skyline_chart_bytes: "CAcSHv0Z",
+      icu_intervals: [{ id: 1, start_index: 0, end_index: 180 }], icu_groups: [{ id: "180s@350w" }],
+    }],
   });
   const result = await call(await connect(), "get_activity", { id: "i555" });
   assert.equal(result.isError, false, result.text);
-  // The activity's own fields stay as they were, nulls included
-  const expected = [{ ...activity, icu_intervals: [kept] }];
-  assert.equal(result.text, JSON.stringify(expected));
+  assert.equal(result.text, JSON.stringify([activity]));
+  // Fetched with its intervals all the same, so get_activity_intervals can use the same cache entry
   assert.deepEqual(requests, [get(ME, "i555")]);
 });

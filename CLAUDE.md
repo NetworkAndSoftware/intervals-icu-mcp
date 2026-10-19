@@ -40,7 +40,8 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | Tool | Description | Cache TTL |
 |------|-------------|-----------|
 | `get_activities` | List activities in date range. Supports `type` filter, `query` (string or `/regex/`), exact `source` and `oauth_client_name` filters, and `fields` to return only some fields (plus `id`) | 1 hour |
-| `get_activity` | Full detail for a single activity, with its intervals' main fields (compact JSON, no `icu_groups`) | Never expires |
+| `get_activity` | Full detail for a single activity, without its intervals, null fields or `skyline_chart_bytes` (compact JSON) | Never expires |
+| `get_activity_intervals` | An activity's intervals, 22 main fields each (compact JSON) | Never expires (same cache entry as `get_activity`) |
 | `get_activity_streams` | Time-series data (watts, HR, cadence, etc.) | Never expires |
 | `analyze_activity_window` | Numbers for sections of a ride (by time, distance or GPS point): avg power, NP, HR, kJ above a threshold and CP, W′ balance (Skiba differential, from the ride start), computed from the streams on the server | Never expires (streams) |
 | `get_fitness` | Weekly fitness summaries (CTL/ATL/TSB, ramp rate, zone times, by-category breakdowns) | 4 hours |
@@ -63,6 +64,7 @@ Base URL: `https://intervals.icu/api/v1/athlete/{ATHLETE_ID}/`
 | `update_sport_settings` | Update one sport's FTP, indoor FTP, W′, Pmax, LTHR, max HR, threshold pace, HR/power zones |
 | `upload_activity` | Upload a completed activity file (.fit/.gpx/.tcx). Local only — not registered on Lambda |
 | `delete_activity` | Delete an activity by activity ID |
+| `set_activity_intervals` | Write intervals on an activity, placed like `analyze_activity_window`'s windows (time, distance or GPS point); `replace` (required) replaces all of them, otherwise intervals.icu merges |
 
 ### Coaching Tools
 
@@ -121,9 +123,11 @@ There is no `RACE` or `REST_DAY` category: races are `RACE_A`, `RACE_B` or `RACE
 - **Attachments:** files are uploaded with `POST /api/attachment` (multipart, 20 MB), which isn't in the public API and returns 401 for the API key, so only the web app can add them. `PUT` accepts `attachments` only as full objects from that upload (`id`, `filename`, `mimetype`, `url`); `update_event` can therefore only remove them, by sending the rest.
 
 ### Activity intervals and streams
-`GET /athlete/{id}/activities/{ids}` leaves out `icu_intervals` and `icu_groups` unless asked with `intervals=true` (until 2026-10 `get_activity` didn't, though its description promised intervals). Each interval has `start_index`/`end_index` (positions in the streams), `start_time`/`end_time` (seconds from the start, elapsed time, like the `time` stream), `elapsed_time`, `moving_time`, `distance` (m covered), averages, `joules_above_ftp`, `wbal_start`/`wbal_end`, but no coordinates: those are in the `latlng` stream at the interval's indexes. About half of the ~80 fields are null; with all of them (and `icu_groups`, pretty-printed) a 3-hour ride's `get_activity` answer was ~59 KB, ~15K tokens, so it returns 22 fields per interval (`INTERVAL_FIELDS` in `activities.ts`), leaves out `icu_groups` (`interval_summary` sums them up) and is compact JSON. The cache key is `activity:{id}:intervals`, so SQLite entries from before (`activity:{id}`, never expiring) aren't served without intervals.
+`GET /athlete/{id}/activities/{ids}` leaves out `icu_intervals` and `icu_groups` unless asked with `intervals=true` (until 2026-10 `get_activity` didn't, though its description promised intervals). Each interval has `start_index`/`end_index` (positions in the streams), `start_time`/`end_time` (seconds from the start, elapsed time, like the `time` stream), `elapsed_time`, `moving_time`, `distance` (m covered), averages, `joules_above_ftp`, `wbal_start`/`wbal_end`, but no coordinates: those are in the `latlng` stream at the interval's indexes. About half of the ~80 fields are null. With all of them (and `icu_groups`, pretty-printed) a 3-hour ride's `get_activity` answer was ~59 KB, ~15K tokens, so the intervals have their own tool, `get_activity_intervals`, with 22 fields each (`INTERVAL_FIELDS` in `intervals.ts`), and `get_activity` leaves them out, along with null fields and `skyline_chart_bytes` (an encoded chart image). Both are compact JSON, and both come from the one cached `intervals=true` fetch. The cache key is `activity:{id}:intervals`, so SQLite entries from before (`activity:{id}`, never expiring) aren't served without intervals.
 
-Streams come back as `[{type, data, data2?}]`; `latlng` has latitudes in `data` and longitudes in `data2`. The `time` stream has gaps where recording paused (auto-pause, café stops: `elapsed_time` vs `icu_recording_time`). `analyze_activity_window` treats a gap of more than 5 s as a stop: no riding (left out of averages and NP) and 0 W for W′ balance, so W′ recovers during it.
+Streams come back as `[{type, data, data2?}]`; `latlng` has latitudes in `data` and longitudes in `data2`. The `time` stream has gaps where recording paused (auto-pause, café stops: `elapsed_time` vs `icu_recording_time`). `analyze_activity_window` treats a gap of more than 5 s as a stop: no riding (left out of averages and NP) and 0 W for W′ balance, so W′ recovers during it. Checked 2026-10 against intervals.icu's own figures for a 3-hour ride: NP and kJ above FTP equal, lowest W′ balance 9,813 vs 9,831 J, W′ at interval ends within 23 J. NP of short windows differs: the tool uses only the window's samples, while intervals.icu's interval NP appears to start the 30 s rolling average before the interval.
+
+`PUT /activity/{id}/intervals` writes intervals (`all=true` replaces them, otherwise intervals.icu merges; not under `/athlete/{id}`, so `set_activity_intervals` checks the owner first). The spec doesn't say which fields it needs: the tool sends `start_index`/`end_index` (exclusive end, as in real intervals) and the matching `start_time`/`end_time`, `type` and `label`, and warns if the answer's `icu_intervals` lack one it sent. Not yet tried against a real activity as of 2026-10. It places the intervals on the streams first and writes nothing if one can't be placed or two overlap.
 
 ### API field name mismatches for events
 The intervals.icu UI reads different fields than what the API names suggest for planned workout targets:
@@ -175,6 +179,7 @@ intervals-icu-mcp/
 │       ├── athletes.ts    # coach_list_athletes
 │       ├── activities.ts  # get_activities, get_activity, get_activity_streams
 │       ├── analysis.ts    # analyze_activity_window (stats and W′ balance for sections of a ride)
+│       ├── intervals.ts   # get_activity_intervals, set_activity_intervals
 │       ├── fitness.ts     # get_fitness, get_events
 │       ├── power-curve.ts # get_power_curve
 │       ├── wellness.ts    # get_wellness
@@ -203,7 +208,7 @@ CREATE TABLE cache (
 
 Use `clear_cache` tool to flush when data seems stale.
 
-Write tools invalidate what they make stale: event writes drop every `events:` and `fitness:` key (SET_FITNESS, SET_EFTP and FITNESS_DAYS events change the fitness numbers), activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:{id}:intervals`/`streams:` keys), settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
+Write tools invalidate what they make stale: event writes drop every `events:` and `fitness:` key (SET_FITNESS, SET_EFTP and FITNESS_DAYS events change the fitness numbers), activity uploads/deletes drop `activities:`, `fitness:` and `power_curve:` (plus that activity's `activity:{id}:intervals`/`streams:` keys), interval writes drop `activity:{id}:intervals` and `activities:`, settings updates drop `zones`/`athlete_settings`. On Lambda this only reaches the instance that handled the write.
 
 Coached athletes' data is in the same cache under `coached:{athleteId}:` + the usual key (`PrefixedCache`), so a coach_ write only invalidates that athlete's entries. The athlete list itself is `coached_athletes`.
 
@@ -241,6 +246,7 @@ Key endpoints used:
 - `GET /api/v1/athlete/{id}/activities` — list activities (also takes `fields`, unused: `get_activities` caches full activities and trims them itself)
 - `GET /api/v1/athlete/{id}/activities/{activityId}?intervals=true` — activity detail with intervals (takes a comma-separated list of IDs, returns a list)
 - `GET /api/v1/activity/{activityId}/streams` — streams (not under `/athlete/{id}` — activity IDs are globally unique)
+- `PUT /api/v1/activity/{activityId}/intervals?all=` — write intervals (`all=true` replaces them)
 - `GET /api/v1/athlete/{id}/athlete-summary` — weekly fitness aggregates
 - `GET /api/v1/athlete/{id}/events` — calendar events
 - `GET /api/v1/athlete/{id}/activity-power-curves` — power curve (best power per duration for activities in a date range)

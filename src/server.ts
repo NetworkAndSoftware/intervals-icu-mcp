@@ -4,6 +4,7 @@ import type { Cache } from "./cache.js";
 import { coachTools, ownTools, type Account } from "./tools/accounts.js";
 import { registerActivityTools } from "./tools/activities.js";
 import { registerAnalysisTools } from "./tools/analysis.js";
+import { registerIntervalTools } from "./tools/intervals.js";
 import { registerAthleteListTool } from "./tools/athletes.js";
 import { registerFitnessTools } from "./tools/fitness.js";
 import { registerPowerCurveTools } from "./tools/power-curve.js";
@@ -34,6 +35,7 @@ export function createMcpServer(
   for (const tools of [ownTools(server, own), coachTools(server, own)]) {
     registerActivityTools(tools);
     registerAnalysisTools(tools);
+    registerIntervalTools(tools);
     registerFitnessTools(tools);
     registerPowerCurveTools(tools);
     registerWellnessTools(tools);
